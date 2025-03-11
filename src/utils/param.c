@@ -210,6 +210,7 @@ int checkingWifiActivate(){
 	char buf[2] = {0};
 	int file_size = GetFileSize_Api(WIFI_CONFIG_FILE);
 	ret = ReadFile_Api(WIFI_CONFIG_FILE, buf, 0, &file_size);
+
 	if (ret != 0)
 	{
 		MAINLOG_L1("!!! ReadFile_Api('wifi_config.dat') failed(%d) !!!", ret);

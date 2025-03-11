@@ -245,12 +245,6 @@ relocate_301:
 
 		 MAINLOG_L1("Received response chunk: %s\n", buf);
 
-#ifdef DEBUG_MSG
-// MAINLOG_L1("===============================\n");
-// MAINLOG_L1("%s\n", buf);
-// MAINLOG_L1("===============================\n");
-#endif
-
 		// Check "\r\n" after HTTP status line
 		p = strstr((char *)buf, "\r\n");
 		if (p == NULL)
@@ -317,12 +311,6 @@ relocate_301:
 
 			length += ret;
 			buf[length] = 0;
-
-#ifdef DEBUG_MSG
-// MAINLOG_L1("===============================\n");
-// MAINLOG_L1("%s\n", buf);
-// MAINLOG_L1("===============================\n");
-#endif
 			continue;
 		}
 
@@ -392,13 +380,6 @@ relocate_301:
 
 				return RECEIVE_ERROR;
 			}
-
-#ifdef DEBUG_MSG
-buf[length] = 0;
-// MAINLOG_L1("===============================\n");
-// MAINLOG_L1("%s\n", buf);
-// MAINLOG_L1("===============================\n");
-#endif
 			dev_savefile(filename, buf, start + offset, length);
 
 			offset += length;
@@ -429,12 +410,6 @@ buf[length] = 0;
 
 				length += ret;
 				buf[length] = 0;
-
-#ifdef DEBUG_MSG
-// MAINLOG_L1("===============================\n");
-// MAINLOG_L1("%s\n", buf);
-// MAINLOG_L1("===============================\n");
-#endif
 				continue;
 			}
 
@@ -467,11 +442,6 @@ buf[length] = 0;
 
 				buf[length] = 0;
 				p1 = (char *)buf;
-#ifdef DEBUG_MSG
-// MAINLOG_L1("===============================\n");
-// MAINLOG_L1("%s\n", buf);
-// MAINLOG_L1("===============================\n");
-#endif
 			}
 
 			dev_savefile(filename, (unsigned char *)p1, start + offset, total);
@@ -500,11 +470,6 @@ buf[length] = 0;
 
 				length += ret;
 				buf[length] = 0;
-#ifdef DEBUG_MSG
-// MAINLOG_L1("===============================\n");
-// MAINLOG_L1("%s\n", buf);
-// MAINLOG_L1("===============================\n");
-#endif
 			}
 
 			if ((p[0] != '\r') || (p[1] != '\n')) {
@@ -535,38 +500,6 @@ buf[length] = 0;
 
 int httpDownload(char *url, int method, char *filename)
 {
-	int ret;
-	int total;
-
-#if 0
-	// Receive all payload within one request, small files can be used in this way
 	return __httpDownload(url, method, filename, 0, -1);
-	// MAINLOG_L1("####### 0");
-#else
-	// Receive payload by range, will ensure large file download stability
-	total = 0;
-	// MAINLOG_L1("####### 1");
-	return __httpDownload(url, method, filename, 0, -1);
-//	while (1) {
-//		// MAINLOG_L1("####### 1234%d",total);
-//		ret = __httpDownload(url, method, filename, total, total + RECEIVE_RANGE - 1);
-//		// MAINLOG_L1("####### %%%%%%%%%d",ret);
-//		if (ret == -416)
-//			// Requested range beyond file size, just finish
-//			break;
-//
-//		if (ret < 0)
-//			return ret;
-//
-//		total += ret;
-//
-//		// If received payload is less than requested Range, this is the last range.
-//		// If received payload is more than requested Range, the server does not support Range
-//		if (ret != RECEIVE_RANGE)
-//			break;
-//	}
-
-	return total;
-#endif
 }
 

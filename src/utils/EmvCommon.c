@@ -438,10 +438,19 @@ int App_CommonSelKernel() {
     if (ret != EMV_OK)
         return ret;
 
-    // SPLIT STRING TO VALUE
-    SplitValueFromReadNFC(&ppse);
+    MAINLOG_L1("ppse.FCITemplate => ", ppse.FCITemplate);
+    snprintf(NFC_INFO.EncodeMobile,
+    		sizeof(NFC_INFO.EncodeMobile),
+			ppse.FCITemplate);
 
-    if (strcmp(NFC_INFO.FromBank, SYS_BANK) == 0) {
+    // Ensure null termination
+    NFC_INFO.EncodeMobile[256 -1] = '\0';
+    MAINLOG_L1("NFC_INFO.EncodeMobile => ", NFC_INFO.EncodeMobile);
+    // CLOSE CODE THE CONDITION
+    // SPLIT STRING TO VALUE
+    // SplitValueFromReadNFC(&ppse);
+
+    if (NFC_INFO.EncodeMobile != NULL) {
     	return 0; // Custom return code for successful NFC text processing
     }
     else{
@@ -772,7 +781,6 @@ void initPayPassWaveConfig(int transType)
 	memcpy(ppParam.MerchantCustomData, "\x04\x11\x22\x33\x44", 5);
 	ppParam.TransCategoryCode = 0x01;
 	PayPass_SetParam_Api(&ppParam);
-
 
 	PayWave_GetParam_Api(&pwparm);
 	AscToBcd_Api(pwparm.TTQ , "3600C000", 8);

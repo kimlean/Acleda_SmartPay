@@ -104,11 +104,15 @@ int GetCard()
 
 				int result = -1;
 				if (g_ucKerType == 0)
-					return 10;
+				{
+					Beep_Api(0);
+					ret = 10;
+				}
 				else if(g_ucKerType == TYPE_KER_PAYWAVE)
 				{
+					Beep_Api(0);
 					result = App_PaywaveTrans(g_ucKerType);
-					LogPrintWithRet(0, "App_PaywaveTrans(): ", result);
+					MAINLOG_L1("App_PaywaveTrans(): %d", result);
 				}
 				else
 				{
@@ -137,10 +141,7 @@ int processTransaction(NFC_PAYMENT entry)
 
 	ret = NFCPayment_Service(&NFC_INFO.EncodeMobile, entry);
 	MAINLOG_L1("NFCPAYMENT STATUS => %d", ret);
-	if (ret < 0) {
-		return -1;
-	}
-	return 10;
+	return ret < 0 ? -1 : 10;
 }
 
 int SelectedCurrency()
@@ -362,19 +363,29 @@ void DynamicQRCode(int currency)
 				sprintf(tmp, "Paid:%s", buf);
 
 				ScrCls_Api();
-				ScrDisp_Api(LINE1, 0, "        Sale               ", CDISP);
+				ScrDisp_Api(LINE1, 0, "Sale", CDISP);
 				ScrDisp_Api(LINE5, 0, tmp, CDISP);
+				Delay_Api(100);
+			}
+			else
+			{
+				ScrCls_Api();
+				ScrDisp_Api(LINE1, 0, "Sale", CDISP);
+				ScrDisp_Api(LINE5, 0, "Transaction", CDISP);
+				ScrDisp_Api(LINE6, 0, "Failed", CDISP);
+				Delay_Api(100);
 			}
 		}
 
 		// FOR NFC CARD
-//		if(ret == 3)
-		else
+		if(ret == 3)
 		{
 			ScrCls_Api();
 			ScrDisp_Api(LINE1, 0, "Coming Soon", CDISP);
 		}
 	}
+
+	ScrCls_Api();
 	secscrCls_lib();
 	secscrSetBackLightValue_lib(0);  //secscrSetBackLightValue_lib is necessary before secscrSetBackLightMode_lib
 	secscrSetBackLightMode_lib(0, 300);

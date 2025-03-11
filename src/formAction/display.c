@@ -485,10 +485,12 @@ void showFNmenu()
 }
 
 void ThanksMode(){
-	// create a globle varible then switch to 0 and 1 make sure defult it is 1 to open
-	// then print to tell use
-	// ThanksMode
-	//   ON || OFF
+	THANKS_MODE = (THANKS_MODE == 0) ? 1 : 0;
+	ScrCls_Api();
+	ScrDisp_Api(LINE1, 0, "Thanks Mode", CDISP);
+	ScrDisp_Api(LINE4, 0, THANKS_MODE ? "ON" : "OFF", CDISP);
+
+	WaitAnyKey_Api(3);
 }
 
 void ShowMainMenu(void) {

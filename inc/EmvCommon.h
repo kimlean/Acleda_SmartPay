@@ -110,7 +110,7 @@ typedef struct {
 	unsigned char SW[2];
 
 	int FCITemplateLen;
-	unsigned char FCITemplate[1024];
+	unsigned char FCITemplate[256];
 } COMMON_PPSE_STATUS;
 
 typedef struct {

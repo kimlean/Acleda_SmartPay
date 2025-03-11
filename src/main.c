@@ -19,7 +19,7 @@
 
 /* Application version and identification information */
 const APP_MSG App_Msg = {
-    "Demo", "Demo-App", "V1.0", "VANSTONE",
+    "ACLEDA BANK", "ACLEDA-App", "V1.0", "KIMLEAN",
     __DATE__ " " __TIME__, "", 0, 0, 0, "00001001140616"
 };
 
@@ -38,6 +38,8 @@ int _IS_P_2_4_ = 0;
 /* Global data structures */
 NFCTAPINFO NFC_INFO;
 SmartPay SmartPay_Info;
+
+int THANKS_MODE = 1; // Default to enabled (1)
 
 void InitSys(void) {
     int ret;
@@ -102,10 +104,6 @@ int AppMain(int argc, char **argv) {
 
     /* Initialize system parameters and components */
     InitSys();
-
-    /* Wait for internet connection */
-    int connectionCheckCount = 0;
-    const int MAX_CONNECTION_ATTEMPTS = 30; // Limit max attempts
 
     while (!checkInternetStatus()) {
         Delay_Api(2000); // 2 second delay

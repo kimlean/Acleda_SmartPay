@@ -44,7 +44,7 @@ typedef struct _LCDINFO{
 
 typedef struct {
 	char FromBank[7];
-	char EncodeMobile[1024];
+	unsigned char EncodeMobile[256];
 }NFCTAPINFO;
 extern NFCTAPINFO NFC_INFO;
 
@@ -293,6 +293,5 @@ extern int _NETWORKCONNECTION_;
 #define USB_PORT_NUM 	10 // USB-OUTPUT-PORT-DEFAULT
 extern int _IS_PORT_OPEN_;
 extern int THANKS_MODE;
-
 
 #endif /* __DEF_H__ */

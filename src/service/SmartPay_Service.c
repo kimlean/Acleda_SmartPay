@@ -70,8 +70,8 @@ void ParseSmartPayData(const char *jsonString, SmartPay *sp)
 	strncpy(sp->cityName, cityName ? cityName->valuestring : "", sizeof(sp->cityName) - 1);
 	strncpy(sp->mctId, mctId ? mctId->valuestring : "", sizeof(sp->mctId) - 1);
 	strncpy(sp->adDataTCGUID, adDataTCGUID ? adDataTCGUID->valuestring : "", sizeof(sp->adDataTCGUID) - 1);
-//
-//	// Ensure null termination
+
+	// Ensure null termination
 	sp->regId[sizeof(sp->regId) - 1] = '\0';
 	sp->accIdKhr[sizeof(sp->accIdKhr) - 1] = '\0';
 	sp->accIdUsd[sizeof(sp->accIdUsd) - 1] = '\0';
@@ -99,8 +99,6 @@ int GetSmartPayInfo_Service()
 		MAINLOG_L1("!!! cJSON_CreateObject() failed(root=NULL) !!!");
 		return -1;
 	}
-
-//	obj = cJSON_AddStringToObject(root, "device_sn", G_sys_param.sn);
 	obj = cJSON_AddStringToObject(root, "device_sn", "00060000279");
 	if (obj == NULL) {
 		MAINLOG_L1("!!! cJSON_AddStringToObject() failed('device_sn') !!!");
