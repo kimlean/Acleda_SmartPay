@@ -25,40 +25,81 @@ void filter_printable_chars(const char *input, char *output) {
     output[j] = '\0';  // Null-terminate the output string
 }
 
+
+int _IS_PORT_OPEN_ = 0;
+
 int GetScanf(u32 mode, int Min, int Max, char *outBuf, u32 TimeOut, u8 StartRow, u8 EndRow, int howstr)
 {
 	return GetScanfEx_Api(mode, Min, Max, outBuf, TimeOut, StartRow, EndRow, howstr, MMI_NUMBER);
 }
 
-
-int _IS_PORT_OPEN_ = 0;
-
-int GetAmount(u8 *pAmt)
+int GetAmount(u8 *pAmt, int currency)
 {
-	int ret;
-	char buf[32], temp[32];
+    int ret;
+    char buf[32], temp[32];
+    int amt, minAmount;
 
-	memset( buf, 0, sizeof( buf));
-	memset( temp, 0, sizeof( temp));
+    // Set minimum amount based on currency
+    // For KHR (currency 1): 10000 (100.00)
+    // For USD (currency 2): 2 (0.02)
+    minAmount = (currency == 1) ? 10000 : 2;
 
-	while(1)
-	{
-		memset(buf, 0, sizeof(buf));
-		ret = GetScanf(MMI_POINT, 1, 12, buf, 60, LINE4, LINE4, MAX_LCDWIDTH);
-		if(ret == ENTER)
-		{
-			memset(temp, 0x30, 12-buf[0]);
-			strcpy(&temp[12-buf[0]], &buf[1]);
-			AscToBcd_Api(pAmt, temp, 12);
-			return 0;
-		}
-		else
-		{
-			return -1;
-		}
-	}
+    memset(buf, 0, sizeof(buf));
+    memset(temp, 0, sizeof(temp));
+
+    while(1)
+    {
+        memset(buf, 0, sizeof(buf));
+
+        // Use MMI_POINT for both currencies since both can have decimal places
+        ret = GetScanf(MMI_POINT, 1, 9, buf, 60, LINE4, LINE4, MAX_LCDWIDTH);
+
+        if(ret == ENTER)
+        {
+            // Format input to BCD
+            memset(temp, 0x30, 12-buf[0]);
+            strcpy(&temp[12-buf[0]], &buf[1]);
+            AscToBcd_Api(pAmt, temp, 12);
+
+            // Convert to long to check minimum amount
+            amt = BcdToLong_Api(pAmt, 6);
+
+            // Check if amount meets minimum requirement
+            if (amt < minAmount)
+            {
+                Beep_Api(1); // Error beep
+
+                ScrClrLine_Api(LINE5, LINE6);  // Clear any previous error messages
+
+
+                // Display appropriate error message
+                if (currency == 1) {
+                    ScrDisp_Api(LINE5, 0, "Amount must greater", CDISP);
+                    ScrDisp_Api(LINE6, 0, "then 100.00 KHR", CDISP);
+                } else {
+                    ScrDisp_Api(LINE5, 0, "Amount must greater", CDISP);
+                    ScrDisp_Api(LINE6, 0, "then 0.02 USD", CDISP);
+                }
+
+                // Wait a moment to show error message
+                WaitAnyKey_Api(3);
+
+                // Clear the error message and let user try again
+                ScrClrLine_Api(LINE5, LINE6);
+                ScrSetColor_Api(0x0000, 0xFFFF);
+
+                // Continue the loop to get input again
+                continue;
+            }
+
+            return 0;  // Valid amount entered
+        }
+        else
+        {
+            return -1;  // User canceled or error
+        }
+    }
 }
-
 
 void GetPanNumber()
 {

@@ -7,6 +7,7 @@
 #include <poslib.h>
 
 #include <cJSON.h>
+#include <string.h>
 
 static void *HTTP_CONNECT = NULL;
 
@@ -277,7 +278,11 @@ int http_utils_parse_aesEn_resp_result(char *result)
 char *read_chunk(char *body_data, int size)
 {
 	char *chunk_end = strstr(body_data, "\r\n");
-	if (chunk_end == NULL || (chunk_end - body_data) != size) { return NULL; }
+
+	// FIXED ME: CHANGE CONDITION
+	//if (chunk_end == NULL || (chunk_end - body_data) != size) { return NULL; }
+
+	if (chunk_end == NULL) { return NULL; }
 
 	chunk_end += 2;
 
@@ -300,20 +305,33 @@ char *read_chunk_size(char *body_data)
 }
 // =====================
 
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-
 int http_utils_parse_header(char *data, char *result, int *is_body_size_ok)
 {
+    if (!data || !result || !is_body_size_ok) {
+        MAINLOG_L1("Invalid parameters passed to http_utils_parse_header");
+        return 0;
+    }
+
+    *is_body_size_ok = 0;
+
     HTTP_UTILS_RESPONSE *resp = (HTTP_UTILS_RESPONSE*)malloc(sizeof(HTTP_UTILS_RESPONSE));
+    if (!resp) {
+        MAINLOG_L1("Memory allocation failed for response");
+        return 0;
+    }
+
     HTTP_UTILS_RESPONSE *resp_tmp = (HTTP_UTILS_RESPONSE*)malloc(sizeof(HTTP_UTILS_RESPONSE));
+    if (!resp_tmp) {
+        MAINLOG_L1("Memory allocation failed for temp response");
+        free(resp);
+        return 0;
+    }
 
     memset(resp, 0, sizeof(HTTP_UTILS_RESPONSE));
     memset(resp_tmp, 0, sizeof(HTTP_UTILS_RESPONSE));
 
     char *start = data;
-    MAINLOG_L1("DATA  ==> %s", data);
+    MAINLOG_L1("DATA ==> %s", data);
 
     // Get Response Status
     for (; *start && *start != '\r'; ++start) {
@@ -330,6 +348,14 @@ int http_utils_parse_header(char *data, char *result, int *is_body_size_ok)
             *start = '\0';
         }
     }
+
+    if (!*start) {
+        MAINLOG_L1("Invalid HTTP response format: Missing CRLF after status line");
+        free(resp_tmp);
+        free(resp);
+        return 0;
+    }
+
     *start = '\0';
     start += 2; // Skip '\r\n'
 
@@ -347,25 +373,36 @@ int http_utils_parse_header(char *data, char *result, int *is_body_size_ok)
         key = line;
         value = ++start; // Start of value
 
+        // Skip leading spaces in the value
+        while (*value == ' ') value++;
+
         while (*start && *start != '\r') start++;
+        if (!*start || *(start+1) != '\n') {
+            MAINLOG_L1("Invalid HTTP header format: Missing CRLF");
+            free(resp_tmp);
+            free(resp);
+            return 0;
+        }
+
         *start = '\0'; // Null-terminate the value
         start += 2; // Skip '\r\n'
         line = start;
 
-        if (!strcasecmp(key, "Content-Length")) {
+        if (strcasecmp(key, "Content-Length") == 0) {
             resp_tmp->bodySize = atoi(value);
-        } else if (!strcasecmp(key, "Transfer-Encoding") && !strcasecmp(value, "chunked")) {
+        } else if (strcasecmp(key, "Transfer-Encoding") == 0 &&
+                  strcasecmp(value, "chunked") == 0) {
             is_data_chunk = 1;
         }
     }
 
     // Get Response Body
-    if (*line == '\r') {
+    if (*line == '\r' && *(line+1) == '\n') {
         line += 2;
         resp_tmp->body = line;
     }
 
-    // Copy parsed data
+    // Copy parsed data safely
     if (resp_tmp->version) resp->version = strdup(resp_tmp->version);
     if (resp_tmp->code) resp->code = strdup(resp_tmp->code);
     if (resp_tmp->desc) resp->desc = strdup(resp_tmp->desc);
@@ -374,46 +411,109 @@ int http_utils_parse_header(char *data, char *result, int *is_body_size_ok)
 
     free(resp_tmp);
 
+    if (!resp->code) {
+        MAINLOG_L1("HTTP response parsing failed: Missing status code");
+        free(resp);
+        return 0;
+    }
+
     MAINLOG_L1("=============== PARSE HTTP RESPONSE ===============");
     char tmp[512] = {0};
-    sprintf(tmp, "%s %s %s\n", resp->version ? resp->version : "(NULL)", resp->code ? resp->code : "(NULL)", resp->desc ? resp->desc : "(NULL)");
+    snprintf(tmp, sizeof(tmp), "%s %s %s",
+            resp->version ? resp->version : "(NULL)",
+            resp->code ? resp->code : "(NULL)",
+            resp->desc ? resp->desc : "(NULL)");
     MAINLOG_L1(tmp);
 
     if (strcmp(resp->code, "200") != 0) {
-        char info[42] = "";
-        sprintf(info, "!!! HTTP REQUEST FAILED(%s) !!!", resp->code);
+        char info[64] = {0};
+        snprintf(info, sizeof(info), "!!! HTTP REQUEST FAILED(%s) !!!", resp->code);
         MAINLOG_L1(info);
+
+        // Free allocated resources before return
+        if (resp->version) free(resp->version);
+        if (resp->code) free(resp->code);
+        if (resp->desc) free(resp->desc);
+        if (resp->body) free(resp->body);
         free(resp);
         return 0;
     }
 
     if (is_data_chunk) {
-        char *chunk_data = NULL;
-        int chunk_size;
+        char *result_buffer = malloc(RECEIVE_BUF_SIZE);
+        if (!result_buffer) {
+            MAINLOG_L1("Memory allocation failed for chunk reassembly");
+            // Free resources and return
+            return 0;
+        }
+        memset(result_buffer, 0, RECEIVE_BUF_SIZE);
+        size_t result_size = 0;
 
-        while ((chunk_size = read_chunk_size(resp->body)) != 0) {
-            chunk_data = read_chunk(resp->body, chunk_size);
-            if (chunk_data == NULL) {
-                MAINLOG_L1("!!! INVALID CHUNK !!!");
-                free(resp);
+        char *current_pos = resp->body;
+
+        while (1) {
+            // Skip any whitespace
+            while (*current_pos && (*current_pos == ' ' || *current_pos == '\r' || *current_pos == '\n'))
+                current_pos++;
+
+            // Parse the chunk size (in hex)
+            char *end_ptr;
+            int chunk_size = strtol(current_pos, &end_ptr, 16);
+
+            // If we couldn't parse the chunk size or it's 0, we're done
+            if (end_ptr == current_pos || chunk_size == 0)
+                break;
+
+            // Move to the data portion (after the CRLF)
+            current_pos = strstr(current_pos, "\r\n");
+            if (!current_pos) {
+                MAINLOG_L1("Invalid chunk format - missing CRLF after size");
+                free(result_buffer);
                 return 0;
             }
-            MAINLOG_L1(chunk_data);
-            resp->body = read_chunk(resp->body, 0);
+            current_pos += 2; // Skip CRLF
+
+            // Copy this chunk's data
+            memcpy(result_buffer + result_size, current_pos, chunk_size);
+            result_size += chunk_size;
+
+            // Move to next chunk
+            current_pos += chunk_size + 2; // +2 for CRLF after data
         }
-        *is_body_size_ok = 1;
+
+        // Copy assembled data to result buffer
+        if (result_size > 0) {
+            memcpy(result, result_buffer, result_size);
+            result[result_size] = '\0';  // Make sure it's null-terminated
+            *is_body_size_ok = 1;
+        }
+
+        free(result_buffer);
     } else {
         MAINLOG_L1("RESP_BODY_SIZE = %d", resp->bodySize);
         if (resp->bodySize > 0) {
-            MAINLOG_L1("!!! Response Body %s", resp->body);
-            memcpy(result, resp->body, resp->bodySize);
-            result[resp->bodySize] = '\0'; // Ensure NULL termination
+            if (resp->body)
+            {
+                memcpy(result, resp->body, resp->bodySize);
+                *is_body_size_ok = 1;
+            } else
+            {
+                MAINLOG_L1("Response has body size but no body content");
+                *is_body_size_ok = 0;
+            }
         } else {
+            MAINLOG_L1("Response has no body content (zero length)");
             *is_body_size_ok = 0;
         }
     }
 
+    // Free allocated resources before return
+    if (resp->version) free(resp->version);
+    if (resp->code) free(resp->code);
+    if (resp->desc) free(resp->desc);
+    if (resp->body) free(resp->body);
     free(resp);
+
     return 1;
 }
 
@@ -439,8 +539,26 @@ int http_utils_connect(
 		int secureFlag = (params->protocol == HTTP_PROTOCOL) ? 0 :
 		                 (params->protocol == HTTPS_PROTOCOL) ? 1 : 2;
 
-		HTTP_CONNECT = net_connect(NULL, params->domain, params->port, timeout, secureFlag, &errCode);
-
+		// Check if we already have a valid API socket
+		if (g_api_socket != NULL && g_api_socket->valid &&
+			strcmp(g_api_socket->host, params->domain) == 0 &&
+			strcmp(g_api_socket->port, params->port) == 0) {
+			
+			HTTP_CONNECT = g_api_socket;
+			errCode = 0;
+			MAINLOG_L1("Reusing existing API socket connection");
+		}
+		else {
+			// Create a new connection
+			HTTP_CONNECT = net_connect(NULL, params->domain, params->port, timeout, secureFlag, &errCode);
+			
+			// Store in global reference if successful
+			if (HTTP_CONNECT != NULL && errCode == 0) {
+				g_api_socket = HTTP_CONNECT;
+				MAINLOG_L1("Stored new API socket connection");
+			}
+		}
+		
 		if (HTTP_CONNECT != NULL && errCode == 0)
 		{
 			reConnectCount = 0;

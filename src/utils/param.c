@@ -4,6 +4,7 @@
  *  Created on: 2021��10��14��
  *      Author: vanstone
  */
+#include "EnvAcleda.h"
 #include <string.h>
 
 #include "def.h"
@@ -48,26 +49,6 @@ static void readSN(char *sn) {
 	strcpy(sn, (char*) (buf + 2));
 }
 
-void createDefaultSysParam()
-{
-//	LogPrintInfo("===== CREATE DEFAULT SYS PARAM =====");
-
-	G_sys_param.mqtt_ssl = 0;
-
-	readSN(G_sys_param.sn);
-//	LogPrintNoRet("SN: ", G_sys_param.sn);
-
-	sprintf(G_sys_param.mqtt_topic,     "%s", "103.83.163.69");
-	// sprintf(G_sys_param.mqtt_topic,     "%s", "103.25.92.104");
-	sprintf(G_sys_param.mqtt_client_id, "%s",      "1883");
-
-	G_sys_param.mqtt_qos 	   = 0;
-	G_sys_param.mqtt_keepalive = 60;
-	G_sys_param.sound_level    = 3;
-
-	saveParam();
-//	printSysParam();
-}
 
 void initLib(void){
 	CheckTmsStatus();
@@ -81,96 +62,56 @@ void initLib(void){
 }
 
 void initParam(void) {
-//	int ret, len = 0;
-//
-//		len = GetFileSize_Api(SYS_PARAM_NAME);
-////		LogPrintWithRet(0, "GetFileSize_Api('sys_param.dat'): ", len);
-//
-//		memset(&G_sys_param, 0, sizeof(SYS_PARAM));
-//
-//		if (len != 0)
-//		//if (0)
-//		{
-//			ret = ReadFile_Api(SYS_PARAM_NAME, (unsigned char *)&G_sys_param, 0, &len);
-////			LogPrintWithRet(0, "ReadFile_Api('sys_param.dat'): ", ret);
-//
-//			if (ret == 0)
-//			{
-////				LogPrintInfo("!!! READ SYS PARAM FROM FILE !!!");
-//
-//				// ===== NOTE: TEST
-//				/*
-//				sprintf(G_sys_param.mqtt_server, "%s", "broker.hivemq.com");
-//				sprintf(G_sys_param.mqtt_port,   "%s", "1883");
-//				G_sys_param.mqtt_ssl = 0;
-//				*/
-//				// MAINLOG_L1("hort_param %d", G_sys_param.sound_level);
-//
-//				sprintf(G_sys_param.mqtt_server, "%s", "103.83.163.69");
-//				sprintf(G_sys_param.mqtt_port,   "%s", "1883");
-//				G_sys_param.mqtt_ssl = 0;
-//				G_sys_param.mqtt_qos 	   = 0;
-//				G_sys_param.mqtt_keepalive = 60;
-//
-//				saveParam();
-//
-//				// ===== NOTE: TEST
-//
-////				printSysParam();
-//			}
-//			else {
-////				LogPrintWithRet(1, "!!! Read File('sys_param.dat') Failed(%d) !!!", ret);
-//				createDefaultSysParam();
-//			}
-//		}
-//		else {
-//			createDefaultSysParam();
-//		}
-	int ret;
-	unsigned int len;
+    int ret;
+    unsigned int len;
+    int initialize_defaults = 1; // Flag to track if we need to initialize defaults
 
-	ret = GetFileSize_Api(SYS_PARAM_NAME);
+    ret = GetFileSize_Api(SYS_PARAM_NAME);
 
-	if (ret == sizeof(SYS_PARAM)) {
-		len = ret;
-		ret = ReadFile_Api(SYS_PARAM_NAME, (unsigned char*) &G_sys_param, 0,
-				&len);
-		if ((ret == 0) && (len == sizeof(SYS_PARAM))) {
-			readSN(G_sys_param.sn);
+    if (ret == sizeof(SYS_PARAM)) {
+        len = ret;
+        ret = ReadFile_Api(SYS_PARAM_NAME, (unsigned char*) &G_sys_param, 0, &len);
+        if ((ret == 0) && (len == sizeof(SYS_PARAM))) {
+            readSN(G_sys_param.sn);
 
-			return;
-		}
-	}
+            // Add validation to ensure the file contains valid data
+            if (strlen(G_sys_param.mqtt_server) > 0 &&
+                strlen(G_sys_param.mqtt_port) > 0) {
+                // strcpy(G_sys_param.mqtt_server, ENV_IOT_IP);//103.83.163.69 103.83.163.104
+				strcpy(G_sys_param.mqtt_server, ENV_DEV_IOT_IP);//103.83.163.69 103.83.163.104
+                strcpy(G_sys_param.mqtt_port, ENV_IOT_PORT);
+                G_sys_param.mqtt_ssl = 0;
+                G_sys_param.mqtt_qos = 0;
+                G_sys_param.mqtt_keepalive = 60;
+                strcpy(G_sys_param.mqtt_topic, G_sys_param.sn);
+                strcpy(G_sys_param.mqtt_client_id, G_sys_param.sn);
+                saveParam();
+                initialize_defaults = 0; // Don't initialize defaults
+            }
+            // Could add more validation as needed
+        }
+    }
 
+    // Only initialize defaults if needed
+    if (initialize_defaults) {
+        // Create default param
+        memset(&G_sys_param, 0, sizeof(SYS_PARAM));
 
-	// Create default param
-	memset(&G_sys_param, 0, sizeof(SYS_PARAM));
+        readSN(G_sys_param.sn);
+        // strcpy(G_sys_param.mqtt_server, ENV_IOT_IP);//103.83.163.69 103.83.163.104
+		strcpy(G_sys_param.mqtt_server, ENV_DEV_IOT_IP);//103.83.163.69 103.83.163.104
+        strcpy(G_sys_param.mqtt_port, ENV_IOT_PORT);
+        G_sys_param.mqtt_ssl = 0;
+        G_sys_param.mqtt_qos = 0;
+        G_sys_param.mqtt_keepalive = 60;
+        strcpy(G_sys_param.mqtt_topic, G_sys_param.sn);
+        strcpy(G_sys_param.mqtt_client_id, G_sys_param.sn);
 
-	readSN(G_sys_param.sn);
-	// MAINLOG_L1("tms 11111111111111111 %d", G_sys_param.sound_level);
-	// MAINLOG_L1("tms 22222222222222222 %s", G_sys_param.sound_level);
-	strcpy(G_sys_param.mqtt_server, "103.83.163.69"); //3.82.39.163  //103.83.163.69    //103.25.92.104
-	strcpy(G_sys_param.mqtt_port, "1883");
-	G_sys_param.mqtt_ssl = 0;
-	G_sys_param.mqtt_qos = 0;
-	G_sys_param.mqtt_keepalive = 60;
-	strcpy(G_sys_param.mqtt_topic, G_sys_param.sn);
-	strcpy(G_sys_param.mqtt_client_id, G_sys_param.sn); //mqttx_78978d08
+        // Add a MAINLOG_L1 statement to confirm defaults are being set
+        // MAINLOG_L1("Setting default MQTT parameters");
 
-	//	strcpy(G_sys_param.mqtt_server, "broker.hivemq.com");
-	//	strcpy(G_sys_param.mqtt_port, "1883");
-	//	G_sys_param.mqtt_ssl = 0;
-//		sprintf(G_sys_param.mqtt_topic, "topic-%s", G_sys_param.sn);
-//		sprintf(G_sys_param.mqtt_client_id, "clientId-%s", G_sys_param.sn);
-
-	// MAINLOG_L1("G_sys_param.mqtt_topic:%s", G_sys_param.mqtt_topic);
-	// MAINLOG_L1("G_sys_param.mqtt_client_id:%s", G_sys_param.mqtt_client_id);
-	G_sys_param.mqtt_qos = 0;
-	G_sys_param.mqtt_keepalive = 60;
-
-	//G_sys_param.sound_level = 1;
-
-	saveParam();
+        saveParam();
+    }
 }
 
 void saveParam(void) {
@@ -202,7 +143,6 @@ void initDeviceType() {
 //			QRCodeDisp();
 		}
 	}
-
 }
 
 int checkingWifiActivate(){
@@ -220,37 +160,20 @@ int checkingWifiActivate(){
 	return 0;
 }
 
-int readWIFIParam()
+int readTMSParam()
 {
 	int ret, len = 64;
 	char buf[64] = "";
+	char configFilePath[128] = {0};  // Buffer for the full file path
 
-	unsigned char *ptr = NULL;
-
-	ret = ReadFile_Api(WIFI_PARAM_FILE, buf, 0, &len);
-	if (ret != 0) {
-		MAINLOG_L1("!!! Read WIFI-PARAM Failed(%d) !!!", ret);
-		return ret;
-	}
-
-	ptr = strstr(buf, ",");
-	if (ptr == NULL) {
-		MAINLOG_L1("!!! WIFI-PARAM ERROR !!!");
-		return -1;
-	}
-
-	memcpy(WIFI_ID, buf,     strlen(buf) - strlen(ptr));
-	memcpy(WIFI_PD, ptr + 1, strlen(ptr + 1));
-
-//	MAINLOG_L1("===== WIFI_PARAM =====");
-//	MAINLOG_L1(WIFI_ID);
-//	MAINLOG_L1(WIFI_PD);
-//	MAINLOG_L1("======================");
 
 
 	char *ptr1 = NULL, *ptr2 = NULL;
 
-	ret = ReadFile_Api("/ext/tms/param_api.dat", buf, 0, &len);
+	// Build the config file path using constants from EnvAcleda.h
+	snprintf(configFilePath, sizeof(configFilePath), "%s%s", CONFIG_SAVE_PATH, CONFIG_FILE_NAME);
+
+	ret = ReadFile_Api(configFilePath, buf, 0, &len);
 	if (ret != 0) {
 		// MAINLOG_L1("!!! Read PARAM Failed(%d) !!!", ret);
 		return ret;
@@ -284,95 +207,7 @@ int readWIFIParam()
 	strcpy(_TMS_HOST_IP_, tms_ip);
 	strcpy(_TMS_HOST_DOMAIN_, tms_domain);
 	strcpy(_TMS_HOST_PORT_, tms_port);
+	MAINLOG_L1("tms PORTS%s%s%s", _TMS_HOST_IP_,_TMS_HOST_DOMAIN_,_TMS_HOST_PORT_);
 
 	return 0;
 }
-
-//int readWIFIParam() {
-//	int ret, len = 64;
-//	char buf[64] = "";
-//	char *ptr1 = NULL, *ptr2 = NULL;
-//
-//	ret = ReadFile_Api("/ext/tms/param_api.dat", buf, 0, &len);
-//	if (ret != 0) {
-//		// MAINLOG_L1("!!! Read PARAM Failed(%d) !!!", ret);
-//		return ret;
-//	}
-//
-//	// Find the first comma
-//	ptr1 = strstr(buf, ",");
-//	if (ptr1 == NULL) {
-//		// MAINLOG_L1("PARAM ERROR: Missing first comma!");
-//		return -1;
-//	}
-//
-//	// Find the second comma
-//	ptr2 = strstr(ptr1 + 1, ",");
-//	if (ptr2 == NULL) {
-//		// MAINLOG_L1("PARAM ERROR: Missing second comma!");
-//		return -1;
-//	}
-//
-//	// Extract IP
-//	memcpy(tms_ip, buf, ptr1 - buf);
-//	tms_ip[ptr1 - buf] = '\0'; // Null-terminate the string
-//
-//	// Extract Domain
-//	memcpy(tms_domain, ptr1 + 1, ptr2 - (ptr1 + 1));
-//	tms_domain[ptr2 - (ptr1 + 1)] = '\0'; // Null-terminate the string
-//
-//	// Extract Port
-//	strcpy(tms_port, ptr2 + 1); // The rest is the port
-//
-//	// MAINLOG_L1("PARAM IP: %s", tms_ip);
-//	// MAINLOG_L1("PARAM DOMAIN: %s", tms_domain);
-//	// MAINLOG_L1("PARAM PORT: %s", tms_port);
-//
-//	strcpy(_TMS_HOST_IP_, tms_ip);
-//	strcpy(_TMS_HOST_DOMAIN_, tms_domain);
-//	strcpy(_TMS_HOST_PORT_, tms_port);
-//
-//	// MAINLOG_L1("PARAM _TMS_HOST_IP_: %s", _TMS_HOST_IP_);
-//	// MAINLOG_L1("PARAM _TMS_HOST_DOMAIN_: %s", _TMS_HOST_DOMAIN_);
-//	// MAINLOG_L1("PARAM _TMS_HOST_PORT_: %s", _TMS_HOST_PORT_);
-//
-//	return 0;
-//}
-
-//int readWIFIParam()
-//{
-//	int ret, len = 64;
-//	char buf[64] = "";
-//
-//	unsigned char *ptr = NULL;
-//
-//
-//	ret = ReadFile_Api("/ext/tms/param_api.dat", buf, 0, &len);
-//	if (ret != 0) {
-//		// MAINLOG_L1("!!! Read PARAM Failed(%d) !!!",ret);
-//		return ret;
-//	}
-//
-//	ptr = strstr(buf, ",");
-//	if (ptr == NULL) {
-//		// MAINLOG_L1("PARAM ERROR !!!");
-//
-//		return -1;
-//	}
-//
-//	memcpy(tms_ip, buf,     strlen(buf) - strlen(ptr));
-//	memcpy(tms_domain, ptr + 1, strlen(ptr + 1));
-//
-//
-//	// MAINLOG_L1("PARAM IP %s",tms_ip);
-//	// MAINLOG_L1("PARAM DOMAIN %s",tms_domain);
-//
-//	strcpy(_TMS_HOST_IP_, tms_ip);
-//	strcpy(_TMS_HOST_DOMAIN_, tms_domain);
-//
-//
-//	// MAINLOG_L1("PARAM _TMS_HOST_IP_ %s",_TMS_HOST_IP_);
-//	// MAINLOG_L1("PARAM _TMS_HOST_DOMAIN_ %s",_TMS_HOST_DOMAIN_);
-//	// MAINLOG_L1("PARAM _TMS_HOST_PORT_ %s",_TMS_HOST_PORT_);
-//	return 0;
-//}

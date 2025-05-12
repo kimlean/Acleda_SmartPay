@@ -88,7 +88,7 @@ int EncryptJson(const char *jsonString, char *output, int encodeKey)
 
 void DecryptJson(const char *hexString, char *output, int EncodeKey)
 {
-	MAINLOG_L1("hexString %s", hexString);
+	 MAINLOG_L1("hexString %s", hexString);
 
     int hexLen = strlen(hexString);
     MAINLOG_L1("hexString hexLen %d", hexLen);
@@ -104,7 +104,7 @@ void DecryptJson(const char *hexString, char *output, int EncodeKey)
 
     if (!encryptedData || !decryptedData)
     {
-    	MAINLOG_L1("Memory allocation failed.\n");
+    	 MAINLOG_L1("Memory allocation failed.\n");
         free(encryptedData);
         free(decryptedData);
         return;
@@ -168,7 +168,6 @@ void DecryptJson(const char *hexString, char *output, int EncodeKey)
 
 int Sha256(char *input, char *output)
 {
-	MAINLOG_L1("VALUE => %s", G_sys_param.sn);
 	int ret = calcSha_lib(G_sys_param.sn, strlen(G_sys_param.sn), output, SHA_TYPE_512);
 	if (ret != 0)
 	{
@@ -197,15 +196,12 @@ void DecodePublicKey() {
     memcpy(result, PK_ENCODE_AES_IV, AES_KEY_LEN);
     result[AES_KEY_LEN] = '\0'; // Null terminate to use string functions safely
 
-    MAINLOG_L1("Before Replacement: %s", result);
-
     // Arrays for replacement strings
     const char *to_replace[] = {"kh", "le", "se", "tc"};
     char replace_with[4][3]; // Each replacement is 2 chars + '\0'
 
     for (int i = 0; i < 4; i++) {
-//        strncpy(replace_with[i], G_sys_param.sn + i * 2, 2);
-        strncpy(replace_with[i], "00060000279" + i * 2, 2);
+       strncpy(replace_with[i], G_sys_param.sn + i * 2, 2);
         replace_with[i][2] = '\0'; // Null-terminate each segment
     }
 
@@ -216,8 +212,6 @@ void DecodePublicKey() {
             memcpy(pos, replace_with[i], 2);
         }
     }
-
-    MAINLOG_L1("After Replacement: %s", result);
 
     memcpy(PK_DECODE_AES_IV, result, AES_KEY_LEN);
 }

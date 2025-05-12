@@ -4,6 +4,9 @@
 #define EXTERN extern
 #define MQTT_PACKET_LEN 640
 
+#define BATER_WARM	   15
+#define BATER_POWR_OFF 3
+
 extern char _TMS_HOST_IP_[64];
 extern char _TMS_HOST_DOMAIN_[128];
 extern char _TMS_HOST_PORT_[64];
@@ -15,6 +18,13 @@ EXTERN unsigned char updateAppName[32];
 extern char global_dB[10];
 extern unsigned char tms_ip[32];
 extern unsigned char tms_domain[32];
+
+extern char KHQRBMP[50];
+extern char USDQRBMP[50];
+extern char DUEQRBMP[50];
+extern int DISPLAY_QR_TYPE;
+extern int g_khrQrExists;
+extern int g_usdQrExists;
 
 #define __DISPLAY__   //terminal with display or not ,   open:yes      close:no
 
@@ -47,6 +57,33 @@ typedef struct {
 	unsigned char EncodeMobile[256];
 }NFCTAPINFO;
 extern NFCTAPINFO NFC_INFO;
+
+// Define maximum domain length if not already defined
+#ifndef MAX_DOMAIN_LENGTH
+#define MAX_DOMAIN_LENGTH 128
+#endif
+
+// Enhanced socket structure with reference counting
+typedef struct {
+    int valid;              // 1 if slot is in use, 0 if free
+    int socket;             // Socket handle
+    int ssl;                // SSL mode (0=none, 1=SSL, 2=SSL with cert)
+    int ref_count;          // Reference counter to track usage
+    char host[MAX_DOMAIN_LENGTH]; // Host to track connection target
+    char port[8];           // Port to track connection target
+} NET_SOCKET_PRI;
+//
+// Maximum number of socket slots
+#define MAX_SOCKETS 10
+#define CERTI_LEN  1024*2
+
+// Global socket slots for connection reuse
+extern NET_SOCKET_PRI sockets[MAX_SOCKETS];
+
+// Global named socket references for common services
+extern NET_SOCKET_PRI *g_tms_socket;
+extern NET_SOCKET_PRI *g_mqtt_socket;
+extern NET_SOCKET_PRI *g_api_socket;
 
 /* Missed system header definitions */
 int tmsUpdateFile_lib(enum tms_flag flag, char *pcFileName, char *signFileName);
@@ -107,6 +144,11 @@ void PlayMP3File(char *audioFileName);
 int wirelessPdpWriteParam_lib(char *apn, char *username, char *password);
 
 
+// Update code here
+#define KH_QRBMP_PATH "/ext/tms/%s_KHR.jpg"
+#define USD_QRBMP_PATH "/ext/tms/%s_USD.jpg"
+#define DUE_QRBMP_PATH "/ext/tms/%s_QR.jpg"
+
 
 #define MAINLOG_L1(format, ...) ApiCoreLog("MAINAPI", __FUNCTION__, 1, format, ##__VA_ARGS__)
 
@@ -128,6 +170,8 @@ int unzipDownFile(unsigned char *fileName);
 // mqtt
 void initMqttOs(void);
 void mQTTMainThread(void);
+void TMSConnection(void);
+void QRKeyInputThread(void);
 
 // sound
 void AppPlayTip(char *tip);
@@ -230,9 +274,8 @@ extern unsigned char HTTP_RESP_DATA_SUP_PACKET[DATA_PACKET_BIG_LEN * 2];
 #ifdef _TEST_SERVER_
 	#define HOST_DOMAIN "115.159.28.147"
 #else
-	// #define HOST_DOMAIN "103.25.92.104"
-	#define HOST_DOMAIN "103.83.163.69"
-	//#define HOST_DOMAIN "103.83.162.99"
+	#define HOST_DOMAIN "103.25.92.104"
+	// #define HOST_DOMAIN "103.83.163.69"
 #endif
 
 #define HOST_DOMAIN_PORT     "2000"
@@ -241,33 +284,37 @@ extern unsigned char HTTP_RESP_DATA_SUP_PACKET[DATA_PACKET_BIG_LEN * 2];
 #define HTTP_REQUEST_ENCRYPT_DATA_SUFFIX "/smartpay/receive_data"
 
 void MenuThread(void);
+void ActionRefresh_Tread(void);
 
-#define WIFI_HOTSPOT_CONFIG_SSID "Acleda SmartPay "
+#define WIFI_HOTSPOT_CONFIG_SSID "Acleda SmartPay"
 #define WIFI_HOTSPOT_CONFIG_PWD  "12345678"
 
 #define WIFI_CONFIG_FILE "/ext/app/data/wifi_config.dat"
 #define WIFI_PARAM_FILE  "/ext/app/data/wifi_param.dat"
 
+#define INTERNET_CONFIG_FILE "/ext/app/data/internet_config.dat"
+#define THANKS_MODE_CONFIG_FILE "/ext/app/data/thanks_mode.dat"
+
 typedef struct
 {
-	unsigned char ucSsid[32];     /*热点名字*/
-	unsigned char ucBssid[6];     /*MAC地址*/
-	int iRssi;      			        /*信号强度*/
-	int iEcn;      				        /*加密方式*/
-	unsigned char ucPassword[64]; /*连接密码*/
-	unsigned char ucConnect;      /*连接状态*/
-	unsigned char ucRFU[32];      /*预留*/
+	unsigned char ucSsid[32];     /*çƒ­ç‚¹å��å­—*/
+	unsigned char ucBssid[6];     /*MACåœ°å�€*/
+	int iRssi;      			        /*ä¿¡å�·å¼ºåº¦*/
+	int iEcn;      				        /*åŠ å¯†æ–¹å¼�*/
+	unsigned char ucPassword[64]; /*è¿žæŽ¥å¯†ç �*/
+	unsigned char ucConnect;      /*è¿žæŽ¥çŠ¶æ€�*/
+	unsigned char ucRFU[32];      /*é¢„ç•™*/
 } WIFI_AP;
 
 typedef struct
 {
-	int iDHCPEnable; 	    /*DHCP使能, 0 -- 关闭 1 -- 开启*/
-	char cIp[20];	        /*静态IP---字符串参数*/
-	char cNetMask[20];	  /*子网掩码---字符串参数*/
-	char cGateWay[20];    /*网关---字符串参数*/
-	//char cDnsServer0[20]; /*DNS服务器1 --- 字符串参数*/
-	//char cDnsServer1[20]; /*DNS服务器2 --- 字符串参数*/
-} ST_WIFI_PARAM; // station模式下的热点WiFi参数
+	int iDHCPEnable; 	    /*DHCPä½¿èƒ½, 0 -- å…³é—­ 1 -- å¼€å�¯*/
+	char cIp[20];	        /*é�™æ€�IP---å­—ç¬¦ä¸²å�‚æ•°*/
+	char cNetMask[20];	  /*å­�ç½‘æŽ©ç �---å­—ç¬¦ä¸²å�‚æ•°*/
+	char cGateWay[20];    /*ç½‘å…³---å­—ç¬¦ä¸²å�‚æ•°*/
+	//char cDnsServer0[20]; /*DNSæœ�åŠ¡å™¨1 --- å­—ç¬¦ä¸²å�‚æ•°*/
+	//char cDnsServer1[20]; /*DNSæœ�åŠ¡å™¨2 --- å­—ç¬¦ä¸²å�‚æ•°*/
+} ST_WIFI_PARAM; // stationæ¨¡å¼�ä¸‹çš„çƒ­ç‚¹WiFiå�‚æ•°
 
 extern int _IS_P_2_4_; // Support Multiple WIFI-SSL
 
@@ -294,4 +341,5 @@ extern int _NETWORKCONNECTION_;
 extern int _IS_PORT_OPEN_;
 extern int THANKS_MODE;
 
+extern int g_RefreshQRDisplay;
 #endif /* __DEF_H__ */

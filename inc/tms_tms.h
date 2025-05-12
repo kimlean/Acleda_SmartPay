@@ -27,10 +27,9 @@
 //extern char _TMS_HOST_DOMAIN_[128];
 //extern char _TMS_HOST_PORT_[64];
 
-
-#define _TMS_HOST_IP_		"103.235.231.19"
-#define _TMS_HOST_DOMAIN_	"ipos-os.jiewen.com.cn"
-#define _TMS_HOST_PORT_		"80"
+//#define _TMS_HOST_IP_		"103.235.231.19"
+//#define _TMS_HOST_DOMAIN_	"ipos-os.jiewen.com.cn"
+//#define _TMS_HOST_PORT_		"80"
 
 #define SENDPACKLEN 1024
 #define RECVPACKLEN 1024*7

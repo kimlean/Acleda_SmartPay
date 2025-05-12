@@ -1,3 +1,4 @@
+#include "EnvAcleda.h"  // Add this include at the top
 #include <string.h>
 #include "def.h"
 #include <coredef.h>
@@ -62,55 +63,67 @@ void filegetlistcbtestings_config_dB(const char *pchDirName, uint32 size,
 }
 
 void download_config_file() {
+    char saveLocation[256];
+    char urlDownload[256];
+    int r;
 
-	char fileName[] = "param_api.dat";
-	char baseURL[] = "http://103.25.92.104/tms/Vanstone/config/";
-	char savePath[] = "/ext/tms/";
+    // Delete existing config files
+    fileFilter = 4;
+    deleteAll();
 
-	char saveLocation[256];
-	char urlDownload[256];
-	int r;
-	// MAINLOG_L1("**** Checking for existing param.dat");
+    // Check if config file exists
+    uint8 *rP = NULL;
+    int iRet = fileGetFileListCB_lib(TMS_FILE_DIR,
+            filegetlistcbtestings_config_file, rP);
 
-	fileFilter=4;
-	deleteAll();
+    if (exist_or_not_file == 1) {
+        // Config file exists, skipping download
+        MAINLOG_L1("**** param.dat exists, skipping download");
 
-	uint8 *rP = NULL;
-	int iRet = fileGetFileListCB_lib(TMS_FILE_DIR,
-			filegetlistcbtestings_config_file, rP);
+        // Even if file exists, we need to read its contents!
+        readTMSParam();
 
-	if (exist_or_not_file == 1) {
-		// MAINLOG_L1("**** param.dat exists, skipping download");
-		// MAINLOG_L1("PARAM _TMS_HOST_IP_ %s", _TMS_HOST_IP_);
-		// MAINLOG_L1("PARAM _TMS_HOST_DOMAIN_ %s", _TMS_HOST_DOMAIN_);
-	} else {
-		snprintf(saveLocation, sizeof(saveLocation), "%s%s", savePath,
-				fileName);
-		snprintf(urlDownload, sizeof(urlDownload), "%s%s", baseURL, fileName);
+        MAINLOG_L1("Config loaded - IP: %s, Domain: %s, Port: %s",
+                  _TMS_HOST_IP_, _TMS_HOST_DOMAIN_, _TMS_HOST_PORT_);
+    } else {
+        // Build paths for download
+        snprintf(saveLocation, sizeof(saveLocation), "%s%s", CONFIG_SAVE_PATH,
+                CONFIG_FILE_NAME);
+        snprintf(urlDownload, sizeof(urlDownload), "%s%s", CONFIG_BASE_URL,
+                CONFIG_FILE_NAME);
 
-		r = httpDownload(urlDownload, METHOD_GET, saveLocation);
+        // Download the configuration file
+        r = httpDownload(urlDownload, METHOD_GET, saveLocation);
 
-		if (r < 0) {
-			// MAINLOG_L1("**** Failed to download param.dat, retrying...");
-			r = httpDownload(urlDownload, METHOD_GET, saveLocation);
-		}
+        // Retry if download failed
+        if (r < 0) {
+             MAINLOG_L1("**** tms Failed to download param.dat, retrying...");
+            r = httpDownload(urlDownload, METHOD_GET, saveLocation);
+        }
 
-		if (r >= 0) {
-			// MAINLOG_L1("**** Successfully downloaded: param.dat");
-		} else {
-			// MAINLOG_L1("**** Failed to download param.dat after retry");
-			strcpy(_TMS_HOST_IP_, "103.235.231.19");
-			strcpy(_TMS_HOST_DOMAIN_, "ipos-os.jiewen.com.cn");
-			strcpy(_TMS_HOST_PORT_, "80");
-			//#define _TMS_HOST_IP_		"103.235.231.19"
-			//#define _TMS_HOST_DOMAIN_	"ipos-os.jiewen.com.cn"
-			//#define _TMS_HOST_PORT_		"80"
-		}
+        if (r >= 0) {
+             MAINLOG_L1("**** tms Successfully downloaded: param.dat");
 
-		exist_or_not_file = 0;
-		readWIFIParam();
-	}
+            // Now read the newly downloaded file
+            readTMSParam();
 
+            MAINLOG_L1("Config loaded - IP: %s, Domain: %s, Port: %s",
+                      _TMS_HOST_IP_, _TMS_HOST_DOMAIN_, _TMS_HOST_PORT_);
+        }
+        else if(r<0) {
+            // Download failed, use default values
+            MAINLOG_L1("**** tms Failed to download param.dat after retry");
+            strcpy(_TMS_HOST_IP_, DEFAULT_TMS_HOST_IP);
+            strcpy(_TMS_HOST_DOMAIN_, DEFAULT_TMS_HOST_DOMAIN);
+            strcpy(_TMS_HOST_PORT_, DEFAULT_TMS_HOST_PORT);
+
+
+            MAINLOG_L1("Using default settings - IP: %s, Domain: %s, Port: %s",
+                       _TMS_HOST_IP_, _TMS_HOST_DOMAIN_, _TMS_HOST_PORT_);
+        }
+
+        exist_or_not_file = 0;
+    }
 }
 
 int is_valid_match(const char *str, const char *match) {
@@ -138,111 +151,74 @@ int is_valid_match(const char *str, const char *match) {
 }
 
 void download_config_dB() {
+    // Device string for matching
+    const char *device = G_sys_param.sn;
+    const char *baseURL = NULL;
+    const char *fileName = NULL;
 
-	// just pointers to const char
-	const char *baseURL = NULL;
-	const char *fileName = NULL;
-	// Your device string
-	const char *device = G_sys_param.sn;
-//	char device[128];                  // Make sure the array is large enough
-//	strcpy(device, G_sys_param.sn);    // Copies the runtime string into device1
+    // Comparison strings
+    char substring1[] = "600";
+    char substring2[] = "6000";
+    char substring3[] = "60000";
 
-//	    // Substring to search for
-	char substring1[] = "600";
-	char substring2[] = "6000";
-	char substring3[] = "60000";
+    // Match device SN and select appropriate URL
+    if (is_valid_match(device, substring1)) {
+        baseURL = DB_BASE_URL_600;
+        fileName = DB_FILENAME_600;
+    } else if (is_valid_match(device, substring2)) {
+        baseURL = DB_BASE_URL_6000;
+        fileName = DB_FILENAME_6000;
+    } else if (is_valid_match(device, substring3)) {
+        baseURL = DB_BASE_URL_60000;
+        fileName = DB_FILENAME_60000;
+    }
 
-	if (is_valid_match(device, substring1)) {
-		// MAINLOG_L1("Yes string existed substring1");
-		baseURL = "http://103.25.92.104/tms/Vanstone/600/";
-		fileName = "600.dat";
-	}else if (is_valid_match(device, substring2)) {
-		// MAINLOG_L1("Yes string existed substring2");
-		baseURL = "http://103.25.92.104/tms/Vanstone/6000/";
-		fileName = "6000.dat";
-	}else if (is_valid_match(device, substring3)) {
-		// MAINLOG_L1("Yes string existed substring3");
-		baseURL = "http://103.25.92.104/tms/Vanstone/60000/";
-		fileName = "60000.dat";
-	}
+    // Check for existing file
+    char saveLocation[256];
+    char urlDownload[256];
+    int r;
 
+    uint8 *rP = NULL;
+    int iRet = fileGetFileListCB_lib(TMS_FILE_DIR,
+            filegetlistcbtestings_config_dB, rP);
 
-	char savePath[] = "/ext/tms/";
+    if (dB_file == 1) {
+        // DB file exists, skipping download
+    } else {
+        // Build download paths
+        snprintf(saveLocation, sizeof(saveLocation), "%s%s", DB_SAVE_PATH, fileName);
+        snprintf(urlDownload, sizeof(urlDownload), "%s%s", baseURL, fileName);
 
-	char saveLocation[256];
-	char urlDownload[256];
-	int r;
+        // Download the configuration file
+        r = httpDownload(urlDownload, METHOD_GET, saveLocation);
 
+        // Retry if download failed
+        if (r < 0) {
+            r = httpDownload(urlDownload, METHOD_GET, saveLocation);
+        }
 
-	// MAINLOG_L1("**** Checking for existing dB.dat");
+        // Process the downloaded file
+        if (r >= 0) {
+            int ret, len = 64;
+            char buf[64] = {0};
+            unsigned char *ptr = NULL;
+            char name[128];
 
-	uint8 *rP = NULL;
-	int iRet = fileGetFileListCB_lib(TMS_FILE_DIR,
-			filegetlistcbtestings_config_dB, rP);
+            snprintf(name, sizeof(name), "/ext/tms/%s", fileName);
+            ret = ReadFile_Api(name, buf, 0, &len);
+            if (ret != 0) {
+                return;
+            }
 
-	if (dB_file == 1) {
-		// MAINLOG_L1("LLLLLLLLLLL **** dB.dat exists, skipping download");
-	} else {
-		snprintf(saveLocation, sizeof(saveLocation), "%s%s", savePath,
-				fileName);
-		snprintf(urlDownload, sizeof(urlDownload), "%s%s", baseURL, fileName);
-		// MAINLOG_L1("URL **** Failed to download dB.dat, retrying... %s",urlDownload);
+            ptr = strstr(buf, ",");
+            if (ptr == NULL) {
+                return;
+            }
 
-		r = httpDownload(urlDownload, METHOD_GET, saveLocation);
+            memcpy(tms_ip, buf, strlen(buf) - strlen(ptr));
+            memcpy(global_dB, ptr + 1, strlen(ptr + 1));
 
-		if (r < 0) {
-			// MAINLOG_L1("LLLLLLLLLLL **** Failed to download dB.dat, retrying...");
-			r = httpDownload(urlDownload, METHOD_GET, saveLocation);
-		}
-
-		if (r >= 0) {
-			// MAINLOG_L1("LLLLLLLLLLL **** Successfully downloaded: dB.dat");
-		} else {
-			// MAINLOG_L1("LLLLLLLLLLL **** Failed to download dB.dat after retry");
-		}
-
-		int ret, len = 64;
-		char buf[64] = "";
-
-		unsigned char *ptr = NULL;
-
-		char name[128];
-
-		snprintf(name, sizeof(name), "%/ext/tms/%s",fileName);
-		ret = ReadFile_Api(name, buf, 0, &len);
-		if (ret != 0) {
-			// MAINLOG_L1("LLLLLLLLLLL Read PARAM Failed(%d) !!!",ret);
-			return;
-		}
-
-		ptr = strstr(buf, ",");
-		if (ptr == NULL) {
-			// MAINLOG_L1("LLLLLLLLLLL PARAM ERROR !!!");
-
-			return;
-		}
-
-		memcpy(tms_ip, buf,     strlen(buf) - strlen(ptr));
-		memcpy(global_dB, ptr + 1, strlen(ptr + 1));
-
-
-
-
-		dB_file = 0;
-
-//		strcpy(_TMS_HOST_IP_,tms_ip);
-//		strcpy(_TMS_HOST_DOMAIN_, tms_domain);
-
-//		// MAINLOG_L1("LLLLLLLLLLL PARAM SN %s",_TMS_HOST_IP_);
-//		// MAINLOG_L1("LLLLLLLLLLL PARAM DB %s",_TMS_HOST_DOMAIN_);
-
-//		char global_dB[124];
-//		strcpy(global_dB, tms_domain);
-
-		// MAINLOG_L1("LLLLLLLLLLL PARAM Global_dB %s",global_dB);
-
-
-
-	}
-
+            dB_file = 0;
+        }
+    }
 }

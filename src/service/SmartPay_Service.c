@@ -17,6 +17,7 @@
 #include <poslib.h>
 
 #include <cJSON.h>
+#include <string.h>
 
 int httpRequestSmartPayInfo(
 		HTTP_UTILS_CONNECT_PARAMS *params,
@@ -35,14 +36,14 @@ void ParseSmartPayData(const char *jsonString, SmartPay *sp)
 
     cJSON *json = cJSON_Parse(decrypted_data);
     if (json == NULL) {
-    	 MAINLOG_L1("Error parsing JSON\n");
+    	 // MAINLOG_L1("Error parsing JSON\n");
         return;
     }
 
     cJSON *data = cJSON_GetObjectItemCaseSensitive(json, "data");
     if (!cJSON_IsObject(data))
     {
-    	MAINLOG_L1("Error: 'data' field not found or invalid\n");
+    	// MAINLOG_L1("Error: 'data' field not found or invalid\n");
         cJSON_Delete(json);
         return;
     }
@@ -96,22 +97,22 @@ int GetSmartPayInfo_Service()
 	cJSON *obj  = NULL;
 	root = cJSON_CreateObject();
 	if (root == NULL) {
-		MAINLOG_L1("!!! cJSON_CreateObject() failed(root=NULL) !!!");
+		// MAINLOG_L1("!!! cJSON_CreateObject() failed(root=NULL) !!!");
 		return -1;
 	}
-	obj = cJSON_AddStringToObject(root, "device_sn", "00060000279");
+	obj = cJSON_AddStringToObject(root, "device_sn", G_sys_param.sn);
 	if (obj == NULL) {
-		MAINLOG_L1("!!! cJSON_AddStringToObject() failed('device_sn') !!!");
+		 MAINLOG_L1("!!! cJSON_AddStringToObject() failed('device_sn') !!!");
 		return -1;
 	}
 	obj = cJSON_AddStringToObject(root, "key", PK_ENCODE_AES_IV);
 	if (obj == NULL) {
-		MAINLOG_L1("!!! cJSON_AddStringToObject() failed('device_sn') !!!");
+		 MAINLOG_L1("!!! cJSON_AddStringToObject() failed('device_sn') !!!");
 		return -1;
 	}
 	char *ParseJson = cJSON_PrintUnformatted(root);
 	if (ParseJson == NULL) {
-		MAINLOG_L1("!!! cJSON_PrintUnformatted() failed(result=NULL) !!!");
+		 MAINLOG_L1("!!! cJSON_PrintUnformatted() failed(result=NULL) !!!");
 		return -1;
 	}
 	cJSON_Delete(root);
@@ -141,19 +142,18 @@ int GetSmartPayInfo_Service()
 	memset(&header, 0, sizeof(HTTP_UTILS_REQUEST_HEADER));
 
 	sprintf(header.accept,	        "%s", "*/*");
-	sprintf(header.accept_encoding, "%s", "gzip, deflate, br");
+	sprintf(header.accept_encoding, "%s", "gzip, deflate, br, chunked");
 	sprintf(header.content_type,    "%s", "application/json; charset=UTF-8");
 	sprintf(header.user_agent,      "%s", "Mozilla/4.0(compatible; MSIE 5.5; Windows 98)");
 	sprintf(header.connection,      "%s", "keep-alive");
 
 	char *result = malloc(1024);
 	if (result == NULL) {
-		// MAINLOG_L1("Error: Failed to allocate memory for result\n");
+		MAINLOG_L1("Error: Failed to allocate memory for result\n");
 		return -1;
 	}
 
 	ret = httpRequestSmartPayInfo(&params, &header, result, body);
-	MAINLOG_L1("result %s", result);
 	if (ret == 0)
 	{
 		ParseSmartPayData(result, &SmartPay_Info);

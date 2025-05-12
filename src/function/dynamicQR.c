@@ -8,7 +8,7 @@
 
 #include "def.h"
 #include "EmvCommon.h"
-#include <EnvAcleda.h>
+#include "EnvAcleda.h"
 #include "httpDownload.h"
 #include "SmartPayInfo.h"
 
@@ -17,6 +17,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <poslib.h>
 
 int g_ucKerType = 0;
 
@@ -91,8 +92,6 @@ int GetCard()
 	while (1)
 	{
 		event = DetectCardEvent(CardData, 60);
-		MAINLOG_L1("DetectCardEvent == %d", event);
-
 		switch (event)
 		{
 			case 0:
@@ -100,48 +99,33 @@ int GetCard()
 				g_ucKerType = App_CommonSelKernel();
 
 				PosCom.TranKernelType = g_ucKerType;
-				MAINLOG_L1("App_CommonSelKernel == %d", g_ucKerType);
-
-				int result = -1;
 				if (g_ucKerType == 0)
 				{
 					Beep_Api(0);
 					ret = 10;
 				}
-				else if(g_ucKerType == TYPE_KER_PAYWAVE)
-				{
-					Beep_Api(0);
-					result = App_PaywaveTrans(g_ucKerType);
-					MAINLOG_L1("App_PaywaveTrans(): %d", result);
-				}
+//				CLOSING CODE NOT ALLOW TO WORK FIST NOT DEVELOP
+//				else if(g_ucKerType == TYPE_KER_PAYWAVE)
+//				{
+//					Beep_Api(0);
+//					ret = App_PaywaveTrans(g_ucKerType);
+//				}
 				else
 				{
+					// KIMLEAN : PREPARE A MP3 FOR SAY PLEASE TRY AGAIN
 					AppPlayTip("no app match");
-					ret = -1;
+					break;
 				}
 			return ret;
-		case ESC:
-		case TIMEOUT:
-		default:
-			ret = -1;
-			return ret;
+			case ESC:
+			case TIMEOUT:
+			default:
+				ret = -1;
+				return ret;
 		}
 	};
+
 	return ret;
-}
-
-int processTransaction(NFC_PAYMENT entry)
-{
-	int ret = 0;
-	char urlDownload[256];
-
-	ScrCls_Api();
-	ScrDisp_Api(LINE5, 0, "Processing", CDISP);
-	ScrDisp_Api(LINE6, 0, "Transaction", CDISP);
-
-	ret = NFCPayment_Service(&NFC_INFO.EncodeMobile, entry);
-	MAINLOG_L1("NFCPAYMENT STATUS => %d", ret);
-	return ret < 0 ? -1 : 10;
 }
 
 int SelectedCurrency()
@@ -173,14 +157,21 @@ int SelectedCurrency()
 }
 
 #define QR_BMP "QR.bmp"
-void QRDisp(unsigned char* str)
+#define UPI_QRBMP_AMT "UPI_QRBMP_AMT.bmp"
+
+#define KH_LOGO "/ext/tms/KHR.jpg"
+#define USD_LOGO "/ext/tms/USD.jpg"
+
+#define KH_GOLD_LOGO "/ext/tms/KHR_Gold.jpg"
+#define USD_GOLD_LOGO "/ext/tms/USD_Gold.jpg"
+
+void QRDisp(unsigned char* str, int QrType)
 {
-	int ret;
-	ret = QREncodeString(str, 3, 3, QR_BMP, 3);
+	QREncodeString(str, 3, 3, UPI_QRBMP_AMT, 4);
 	ScrCls_Api();
-	ScrDispImage_Api(QR_HEADER, 0, 0);
-	ScrDispImage_Api(QR_BMP, 30, 100);
-	ScrDispImage_Api(BK_LOGO, 105, 170);
+//	ScrDispImage_Api(KHQR_CONCAT, 0, 0);
+	ScrDispImage_Api(UPI_QRBMP_AMT, 6, 10);
+	ScrDispImage_Api(QrType == 1 ? KH_GOLD_LOGO : USD_GOLD_LOGO , 105, 100);
 }
 
 // Function to calculate CRC16-CCITT-FALSE
@@ -218,6 +209,8 @@ void CRC16ToHex(uint16_t crc, char* hexStr)
 
 char* PrepareQRContent(long amount, int currency, char* formattedAmount, NFC_PAYMENT* NFCPAYMENTREQUEST) {
     static char qrContent[512];  // Increase size to avoid truncation risk
+    // Format amount with or without decimal point based on currency
+    MAINLOG_L1("Log amount %ld", amount);
     snprintf(formattedAmount, 24, "%ld.%02ld", amount / 100, amount % 100);
 
     strncpy(NFCPAYMENTREQUEST->amount, formattedAmount, sizeof(NFCPAYMENTREQUEST->amount) - 1);
@@ -230,26 +223,18 @@ char* PrepareQRContent(long amount, int currency, char* formattedAmount, NFC_PAY
 
     char merchanValue[128];
     snprintf(merchanValue, sizeof(merchanValue), "%s%s0206ACLEDA", SmartPay_Info.adDataTCGUID, merchantAccount);
-    char merchanValueLength[3];
-    snprintf(merchanValueLength, sizeof(merchanValueLength), "%02d", (int)strlen(merchanValue));
     char merchantInfo[128];
-    snprintf(merchantInfo, sizeof(merchantInfo), "30%s%s", merchanValueLength, merchanValue);
-
-    const char *timeoutQR = getTimeOutASecound();
+    snprintf(merchantInfo, sizeof(merchantInfo), "30%02d%s", (int)strlen(merchanValue), merchanValue);
 
     char terminalValue[128];
-    snprintf(terminalValue, sizeof(terminalValue), "00%02d%s010170313%s", (int)strlen(SmartPay_Info.mctId), SmartPay_Info.mctId, timeoutQR);
-    char terminalValueLength[3];
-    snprintf(terminalValueLength, sizeof(terminalValueLength), "%02d", (int)strlen(terminalValue));
+    snprintf(terminalValue, sizeof(terminalValue), "00%02d%s01014", (int)strlen(SmartPay_Info.mctId), SmartPay_Info.mctId);
     char terminalInfo[128];
-    snprintf(terminalInfo, sizeof(terminalInfo), "39%s%s", terminalValueLength, terminalValue);
+    snprintf(terminalInfo, sizeof(terminalInfo), "39%02d%s", (int)strlen(terminalValue), terminalValue);
 
     char additionalValue[128];
-    snprintf(additionalValue, sizeof(additionalValue), "0113%s%s0711%s", timeoutQR, SmartPay_Info.mbNo, G_sys_param.sn);
-    char additionalValueLength[3];
-    snprintf(additionalValueLength, sizeof(additionalValueLength), "%02d", (int)strlen(additionalValue));
+    snprintf(additionalValue, sizeof(additionalValue), "%s0711%s", SmartPay_Info.mbNo, G_sys_param.sn);
     char additionalData[128];
-    snprintf(additionalData, sizeof(additionalData), "62%s%s", additionalValueLength, additionalValue);
+    snprintf(additionalData, sizeof(additionalData), "62%02d%s", (int)strlen(additionalValue), additionalValue);
 
     char merchantName[128];
     snprintf(merchantName, sizeof(merchantName), "59%02d%s", (int)strlen(SmartPay_Info.mctName), SmartPay_Info.mctName);
@@ -284,24 +269,25 @@ void ShowQRCode(long amount, int currency, NFC_PAYMENT *NFCPAYMENTREQUEST) {
     strcat(qrContent, crcHex);
 
     strncpy((char*)qrBuffer, qrContent, sizeof(qrBuffer) - 1);
-    QRDisp(qrBuffer);
+    QRDisp(qrBuffer, currency);
 
-    MAINLOG_L1("Displayed QR Code: %s", qrBuffer);
+    char displayAmount[32];
+	sprintf(displayAmount, "%s %s", formattedAmount, (currency == 1) ? "KHR" : "USD");
 
-    ScrFontSet_Api(1);
-    ScrDisp_Api(3, 30, SmartPay_Info.mctName, LDISP);
-
-    ScrFontSet_Api(5);
-    ScrDisp_Api(3, 20, formattedAmount, LDISP);
-
-    ScrSetColor_Api(0xD124, 0xFFFF);
-    for (int i = 0; i < 9; i++) {
-        ScrDrawLine_Api(228 + i, 48 + i, 250, 48 + i, 1);
-    }
+	ScrFontSet_Api(5);
+	ScrSetColor_Api(0x001F, 0xFFFF);
+	ScrDisp_Api(11, 0, displayAmount, CDISP);
 }
 
 void DynamicQRCode(int currency)
 {
+	// Check if SmartPay_Info.regId is not empty
+	if (SmartPay_Info.regId[0] == '\0')
+	{
+		MAINLOG_L1("Condition Check");
+		NoQRDisplayDynamicQr();
+		return;
+	}
 	int ret = 0, amt;
 	unsigned char tmp[32], buf[12];
 	memset(&PosCom, 0, sizeof(PosCom));
@@ -325,63 +311,44 @@ void DynamicQRCode(int currency)
 	ScrCls_Api();
 	ScrDisp_Api(LINE1, 0, "Sale", CDISP);
 	ScrDisp_Api(LINE3, 0, InputAmountType, LDISP);
-	if (GetAmount(PosCom.stTrans.TradeAmount) != 0)
-		return;
+	if (GetAmount(PosCom.stTrans.TradeAmount, currency) == 0){
 
-	// SHOW QR CODE BY THE AMOUNT
-	amt = BcdToLong_Api(PosCom.stTrans.TradeAmount, 6);
-	ScrCls_Api();
-	snprintf(NFCPAYMENTREQUEST.ccy, sizeof(NFCPAYMENTREQUEST.ccy), CurrencyStr);
-	ShowQRCode(amt, currency, &NFCPAYMENTREQUEST);
+		// SHOW QR CODE BY THE AMOUNT
+		amt = BcdToLong_Api(PosCom.stTrans.TradeAmount, 6);
 
-	// KIMLEAN GETING VALUE OF THE CARDs
-	ret = GetCard();
-	if(ret != -1)
-	{
 		ScrCls_Api();
-		ScrDisp_Api(LINE1, 0, "Processing Transaction", CDISP);
+		snprintf(NFCPAYMENTREQUEST.ccy, sizeof(NFCPAYMENTREQUEST.ccy), CurrencyStr);
+		ShowQRCode(amt, currency, &NFCPAYMENTREQUEST);
 
-		char FromBank[100];
-		snprintf(FromBank, sizeof(FromBank), "FromBank : %s", NFC_INFO.FromBank);
-		ScrDisp_Api(LINE3, 10, FromBank, LDISP);
+		/*
+			NOTE: CALL API FOR PROCESS THE TRANSACTION
+		    NOW USING ONLY ON SUCCESSS RETURN 10
+			WILL SET CONDITION 10 || 3 WHEN FINISH THE NFC WITH CARD
+		*/
 
-/*
-		NOTE: CALL API FOR PROCESS THE TRANSACTION
-			  NOW USING ONLY ON SUCCESSS RETURN 10
-		      WILL SET CONDITION 10 || 3 WHEN FINISH THE NFC WITH CARD
-*/
-
-		// PROCESSING API WITH ACLEDA MOBILE
-		if (ret == 10)
+		// KIMLEAN GETING VALUE OF THE CARDs
+		ret = GetCard();
+		if(ret != -1)
 		{
-			ret = processTransaction(NFCPAYMENTREQUEST);
-			if(ret == 10)
+			ScrCls_Api();
+			if(NFC_INFO.EncodeMobile != NULL)
 			{
-				memset(buf, 0, sizeof(buf));
-				memset(tmp, 0, sizeof(tmp));
-				sprintf(buf, "%d.%02d", amt / 100, amt % 100);
-				sprintf(tmp, "Paid:%s", buf);
-
-				ScrCls_Api();
-				ScrDisp_Api(LINE1, 0, "Sale", CDISP);
-				ScrDisp_Api(LINE5, 0, tmp, CDISP);
-				Delay_Api(100);
+				if(ret == 10)
+				{
+					// MOBILE NFC
+					ret = NFCPayment_Service(&NFC_INFO.EncodeMobile, NFCPAYMENTREQUEST);
+					MAINLOG_L1("NFCPayment_Service %d", ret);
+					if(ret == 1)
+					{
+						// SHOW MESSAGE FAIL PROCESSING
+						AppPlayTip("Processing Failed");
+					}
+				}
 			}
 			else
 			{
-				ScrCls_Api();
-				ScrDisp_Api(LINE1, 0, "Sale", CDISP);
-				ScrDisp_Api(LINE5, 0, "Transaction", CDISP);
-				ScrDisp_Api(LINE6, 0, "Failed", CDISP);
-				Delay_Api(100);
+				AppPlayTip("Please try again");
 			}
-		}
-
-		// FOR NFC CARD
-		if(ret == 3)
-		{
-			ScrCls_Api();
-			ScrDisp_Api(LINE1, 0, "Coming Soon", CDISP);
 		}
 	}
 
@@ -397,4 +364,25 @@ void DynamicQRCode(int currency)
     // CLEAR NFC VALUE STORING
 	memset(&NFC_INFO, 0, sizeof(NFCTAPINFO));
 	PiccStop();
+	return;
 }
+
+void NoQRDisplayDynamicQr()
+{
+	ScrCls_Api();
+	ScrDisp_Api(LINE1, 0, "Dynamic QR", CDISP);
+
+	ScrFontSet_Api(3);
+	ScrDisp_Api(LINE3, 0, "Account information", LDISP);
+	ScrDisp_Api(LINE4, 0, "loading failed!", LDISP);
+
+	ScrFontSet_Api(4);
+	ScrSetColor_Api(0xF800, 0xFFFF);
+	ScrDisp_Api(10, 0, "ERROR", CDISP);
+	WaitAnyKey_Api(10);
+
+	// RESERT COLOR
+	ScrSetColor_Api(0x0000, 0xFFFF);
+	ScrFontSet_Api(5);
+}
+

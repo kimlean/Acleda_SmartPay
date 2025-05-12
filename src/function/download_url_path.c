@@ -1,94 +1,76 @@
-#include <sys/stat.h>
-#include <unistd.h>
+/*
+ * downlaod_url_path.c
+ *
+ *  Created on: 2021-10-14
+ *  SY KIMLEAN: Modified on: 2025-03-03
+ */
 #include "httpDownload.h"
-#include <cJSON.h>
 #include "def.h"
+#include "http_utils.h"
+
+#include <stdlib.h>
+#include <coredef.h>
+#include <struct.h>
+#include <poslib.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <cJSON.h>
 
 #define SHORT_TIMEOUT_MS 1000  // A shorter timeout to avoid blocking too long.
-#define SMALL_RECV_BUF_SIZE 2048  // Reduce buffer size for memory efficiency.
-static void* netContext = NULL;
+#define SMALL_RECV_BUF_SIZE 2048  // Buffer size for memory efficiency.
 
-/**
- * @brief Send the entire buffer in small chunks, handling partial writes.
- */
-static int send_all(void* context, const unsigned char* buffer, int length) {
-    int totalSent = 0;
-    while (totalSent < length) {
-        int sent = net_write(context, buffer + totalSent, length - totalSent, SHORT_TIMEOUT_MS);
-        if (sent <= 0) return -1;  // Timeout or error
-        totalSent += sent;
-    }
-    return totalSent;
-}
-
-/**
- * @brief Read response in smaller chunks until server closes or buffer is full.
- */
-static int read_all_chunks(void* context, unsigned char* buffer, int bufferSize) {
-    int totalRead = 0;
-    while (totalRead < bufferSize - 1) {
-        int recvLen = net_read(context, buffer + totalRead, bufferSize - 1 - totalRead, SHORT_TIMEOUT_MS);
-        if (recvLen < 0) return -1;  // Error or timeout
-        if (recvLen == 0) break;     // Server closed the connection
-        totalRead += recvLen;
-    }
-    buffer[totalRead] = '\0';  // Null-terminate
-    return totalRead;
-}
-
-/**
- * @brief Makes a single HTTP GET request and returns the parsed "url_audio_path".
- */
 char* make_http_request(const char* ip, const char* port, const char* amount,
                         const char* currency, const char* sn, const char* timeStamp,
                         int volume, const char* token) {
-    unsigned char recvBuf[SMALL_RECV_BUF_SIZE];  // Reduced buffer size for memory efficiency
     static char urlPath[512];  // Use static buffer to avoid dynamic allocations
+    char responseBuf[SMALL_RECV_BUF_SIZE];
+
     memset(urlPath, 0, sizeof(urlPath));
+    memset(responseBuf, 0, sizeof(responseBuf));
 
-    // Close existing context if not reusing
-    if (netContext) {
-        net_close(netContext);
-        netContext = NULL;
-    }
+    // Prepare query string for GET request
+    char *queryString[512] = {0};
+    sprintf(queryString, "?amount=%s&currency=%s&device_id=%s&speaker_id=2&timestamp=%s&volume=%d&suffix=%d&access_token=%s",
+                 amount, currency, sn, timeStamp, volume, THANKS_MODE, token);
 
-    // Connect to server
-    int errCode;
-    netContext = net_connect(NULL, ip, port, SHORT_TIMEOUT_MS, 0, &errCode);
-    if (!netContext || errCode != 0) return NULL;
+	MAINLOG_L1("queryString => %s", queryString);
 
-    // Prepare HTTP GET request
-    char request[512];
-    snprintf(request, sizeof(request),
-             "GET /generate-url?amount=%s&currency=%s&device_id=%s&speaker_id=2&timestamp=%s"
-             "&volume=%d&access_token=%s HTTP/1.1\r\nHost: %s:%s\r\n"
-             "Accept: application/json\r\nConnection: close\r\n\r\n",
-             amount, currency, sn, timeStamp, volume, token, ip, port);
+    // Set up connection parameters
+	HTTP_UTILS_CONNECT_PARAMS connectParams;
+	memset(&connectParams, 0, sizeof(HTTP_UTILS_CONNECT_PARAMS));
+	connectParams.protocol = HTTP_PROTOCOL;
+	sprintf(connectParams.domain, "%s", ip);
+	sprintf(connectParams.port, "%s", port);
+	sprintf(connectParams.type, "%s", "GET");
+	sprintf(connectParams.request_suffix, "%s", "/generate-url");
+	sprintf(connectParams.version, "%s", "HTTP/1.1");
 
-    // Send request
-    if (send_all(netContext, (const unsigned char*)request, strlen(request)) < 0) {
-        net_close(netContext);
+	// Set up request header
+	HTTP_UTILS_REQUEST_HEADER requestHeader;
+	memset(&requestHeader, 0, sizeof(HTTP_UTILS_REQUEST_HEADER));
+
+	sprintf(requestHeader.accept, "%s", "*/*");
+	sprintf(requestHeader.accept_encoding, "%s", "gzip, deflate, br");
+	sprintf(requestHeader.content_type, "%s", "application/json; charset=UTF-8");
+	sprintf(requestHeader.user_agent, "%s", "Mozilla/4.0(compatible; MSIE 5.5; Windows 98)");
+	sprintf(requestHeader.connection, "%s", "close");
+
+    // Make the HTTP request
+    int ret = http_utils_connect(&connectParams, &requestHeader, NULL, responseBuf, 1, queryString);
+
+    if (ret < 0) {
+        MAINLOG_L1("HTTP request failed with error: %d", ret);
         return NULL;
     }
 
-    // Read response
-    if (read_all_chunks(netContext, recvBuf, sizeof(recvBuf)) < 0) {
-        net_close(netContext);
-        return NULL;
-    }
+    // Log the response for debugging
+    MAINLOG_L1("Response: %.*s", 100, responseBuf); // Show first 100 chars for debugging
 
-    // Parse HTTP body
-    char* body = strstr((char*)recvBuf, "\r\n\r\n");
-    if (!body) {
-        net_close(netContext);
-        return NULL;
-    }
-    body += 4;
-
-    // Parse JSON
-    cJSON* json = cJSON_Parse(body);
+    // Parse JSON response
+    cJSON* json = cJSON_Parse(responseBuf);
     if (!json) {
-        net_close(netContext);
+        MAINLOG_L1("Failed to parse JSON response");
         return NULL;
     }
 
@@ -96,9 +78,13 @@ char* make_http_request(const char* ip, const char* port, const char* amount,
     cJSON* urlItem = cJSON_GetObjectItem(json, "url_audio_path");
     if (urlItem && cJSON_IsString(urlItem)) {
         snprintf(urlPath, sizeof(urlPath), "%s", urlItem->valuestring);
+        MAINLOG_L1("Successfully extracted URL: %s", urlPath);
+    } else {
+        MAINLOG_L1("URL path not found in response");
+        cJSON_Delete(json);
+        return NULL;
     }
 
     cJSON_Delete(json);
-    net_close(netContext);
     return urlPath[0] ? urlPath : NULL;
 }

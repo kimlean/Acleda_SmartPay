@@ -41,7 +41,7 @@ void EnableWIFI()
     if (file_size == 0)
     {
         AppPlayTip("Please config WiFi");
-        WifiConfig();
+        ConfigWifi();
     }
     else
     {
@@ -52,7 +52,7 @@ void EnableWIFI()
         {
             MAINLOG_L1("!!! ReadFile_Api('wifi_config.dat') failed(%d) !!!", ret);
             AppPlayTip("Read WiFi configuration failed, please config WiFi again");
-            WifiConfig();
+            ConfigWifi();
         }
         else
         {
@@ -63,51 +63,47 @@ void EnableWIFI()
             {
                 int check_count = 0;
 
-            WIFI_CONNECT_CHECK:
-                MAINLOG_L1("WIFI_CONNECT_CHECK PROCESS = %d", check_count);
-                Delay_Api(5000);
-                ret = wifiGetLinkStatus_lib();
-                MAINLOG_L1("WIFI_LINK_STATUS = %d", ret);
+				WIFI_CONNECT_CHECK:
+					MAINLOG_L1("WIFI_CONNECT_CHECK PROCESS = %d", check_count);
+					Delay_Api(3000);
+					ret = wifiGetLinkStatus_lib();
+					MAINLOG_L1("WIFI_LINK_STATUS = %d", ret);
+					if (ret == 2)
+					{
+						_IS_WIFI_ENABLED_ = 1;
+						_IS_WIFI_READY_ = 1;  // Added this to indicate WiFi is ready
 
-                // Check if the correct status code for connection is being used
-                // According to most WiFi libraries, status 2 usually means "connected"
-                // But verify this against your device's documentation
-                if (ret == 2)
-                {
-                    _IS_WIFI_ENABLED_ = 1;
-                    _IS_WIFI_READY_ = 1;  // Added this to indicate WiFi is ready
+						// CLOSE THE INTERNET
+						_IS_GPRS_ENABLED_ = 0;
+						_IS_GPRS_READY_ = 0;  // Added this to ensure GPRS is marked as not ready
 
-                    // CLOSE THE INTERNET
-                    _IS_GPRS_ENABLED_ = 0;
-                    _IS_GPRS_READY_ = 0;  // Added this to ensure GPRS is marked as not ready
+						AppPlayTip("WiFi connected");
+					}
+					else
+					{
+						if (check_count >= 2)
+						{
+							AppPlayTip("Cannot connect to your WiFi");
+							_IS_WIFI_ENABLED_ = 0;
+							_IS_WIFI_READY_ = 0;  // Added this to ensure WiFi is marked as not ready
 
-                    AppPlayTip("WiFi connected");
-                }
-                else
-                {
-                    if (check_count >= 1)
-                    {
-                        AppPlayTip("Cannot connect to your WiFi");
-                        _IS_WIFI_ENABLED_ = 0;
-                        _IS_WIFI_READY_ = 0;  // Added this to ensure WiFi is marked as not ready
-
-                        MAINLOG_L1("Falling back to GPRS after WiFi failure");
-                        EnableGPRS();
-                        return;
-                    }
-                    else
-                    {
-                        check_count++;
-                        MAINLOG_L1("Rebooting WiFi connection, attempt %d", check_count);
-                        wifiReboot();
-                        goto WIFI_CONNECT_CHECK;
-                    }
-                }
+							MAINLOG_L1("Falling back to GPRS after WiFi failure");
+							EnableGPRS();
+							return;
+						}
+						else
+						{
+							check_count++;
+							MAINLOG_L1("Rebooting WiFi connection, attempt %d", check_count);
+							wifiReboot();
+							goto WIFI_CONNECT_CHECK;
+						}
+					}
             }
             else
             {
                 AppPlayTip("Invalid WiFi configuration, please reconfigure");
-                WifiConfig();
+                ConfigWifi();
             }
         }
     }
@@ -180,10 +176,21 @@ void ResetWifi()
 	ScrCls_Api();
 	ScrDisp_Api(LINE5, 0, "Please wait", CDISP);
 
-	DelFile_Api(WIFI_CONFIG_FILE);
-	int ret = wifiRestore_lib();
+	int ret = wifiClose_lib();
+	MAINLOG_L1("WI-FI CLOSE STATUS %d", ret);
+	ret = wifiReset_lib();
+	MAINLOG_L1("WI-FI RESET STATUS %d", ret);
+//	ret = wifiRestore_lib();
+//	MAINLOG_L1("WI-FI RESTORE STATUS %d", ret);
 	if(ret == 0)
 	{
+		// DELETE WIFI PASSWORD
+		DelFile_Api(WIFI_CONFIG_FILE);
+		DelFile_Api(WIFI_PARAM_FILE);
+
+		// DELETE INTERNET CONFIG FILE
+		DelFile_Api(INTERNET_CONFIG_FILE);
+
 		AppPlayTip("Wifi Reset. Smart Pay Reboot");
 		ScrCls_Api();
 		ScrDisp_Api(LINE5, 0, "Wifi Reset", CDISP);
@@ -192,11 +199,35 @@ void ResetWifi()
 	}
 }
 
+void SelectedWIFIConnection()
+{
+	ScrCls_Api();
+	ScrClsRam_Api();
+	ScrDispRam_Api(5, 0, "WiFi Connecting", CDISP);
+	ScrDispRam_Api(6, 0, "Please Wait...", CDISP);
+
+	EnableWIFI();
+	saveInternetConnectionType(2);
+	return;
+}
+
+void SelectedGPRS()
+{
+	ScrCls_Api();
+	ScrClsRam_Api();
+	ScrDispRam_Api(5, 0, "Sim Connecting", CDISP);
+	ScrDispRam_Api(6, 0, "Please Wait...", CDISP);
+
+	EnableGPRS();
+	saveInternetConnectionType(1);
+	return;
+}
+
 void SelectedNetwork()
 {
 	int nSelcItem = 1, ret;
 	char *pszTitle = "Network Connection";
-	const char *pszItems[] = {"1. Wifi Connection", "2. 4G SIM Internet"};
+	const char *pszItems[] = {"1.Wifi 2.4GHz", "2.4G SIM Internet"};
 	while (1)
 	{
 		// DISPLAY THE PARM MENU AND RETURN THE KEY CLICK AND TIME TO CLOSE
@@ -205,10 +236,10 @@ void SelectedNetwork()
 		switch (nSelcItem)
 		{
 		case DIGITAL1:
-			EnableWIFI();
+			SelectedWIFIConnection();
 			return;
 		case DIGITAL2:
-			EnableGPRS();
+			SelectedGPRS();
 			return;
 		case ESC:
 			return;
@@ -222,7 +253,7 @@ void DisplayChoiceNetwork()
 {
 	int nSelcItem = 1, ret;
 	char *pszTitle = "Select Network";
-	const char *pszItems[] = {"", "1. Wifi Connection", "2. 4G SIM Internet"};
+	const char *pszItems[] = {"", "1.Wifi Connect 2.4GHz", "2.4G SIM Internet"};
 	while (1)
 	{
 		// DISPLAY THE PARM MENU AND RETURN THE KEY CLICK AND TIME TO CLOSE
@@ -230,42 +261,52 @@ void DisplayChoiceNetwork()
 								 sizeof(pszItems) / sizeof(char *), DIGITAL1, DIGITAL2, 0, 60);
 		switch (nSelcItem)
 		{
-		case DIGITAL1:
-			EnableWIFI();
-			break;
-		case DIGITAL2:
-			EnableGPRS();
-			return;
-		case -2:
-			TimeOutChoiseConnection();
-			break;
-		default:
-			break;
+			case DIGITAL1:
+				saveInternetConnectionType(2);
+				ConfigWifi();
+				return;
+			case DIGITAL2:
+				EnableGPRS();
+				saveInternetConnectionType(1);
+				return;
+			case -2:
+				TimeOutChoiseConnection();
+				break;
+			default:
+				break;
 		}
 	}
 	return;
 }
 
-void InitConnection()
-{
-	// USING INTERNENT DEVELOP
-//	EnableGPRS();
+void InitConnection() {
+    int connectionType = getInternetConnectionType();
+    int ret;
 
-	int ret;
-	// CHECKING SMART PAY ALREADYS HAVE WIFI PARAM
-	ret = checkingWifiActivate();
-	MAINLOG_L1("checkingWifiActivate %d", ret);
-	// NO WIFI PARAM CHECK USER TO CHOSES NETWORK CONNECTION
-	if (ret != 0)
-	{
-		AppPlayTip("Please select network.");
-		DisplayChoiceNetwork();
-	}
-	// AUTO CONNECT TO THE WIFI
-	else
-	{
-		EnableWIFI();
-	}
+    MAINLOG_L1("InitConnection: Saved connection type: %d", connectionType);
+
+    // If WiFi was the last selected connection
+    if (connectionType == 2) {
+        // Check if WiFi is configured
+        ret = checkingWifiActivate();
+        MAINLOG_L1("checkingWifiActivate %d", ret);
+
+        if (ret == 0) {
+            // WiFi is configured, try to connect
+            EnableWIFI();
+            return;
+        }
+    }
+    // If GPRS was the last selected connection
+    else if (connectionType == 1) {
+        // Try to connect using GPRS
+        EnableGPRS();
+        return;
+    }
+
+    // No valid saved preference or connection failed, ask user to choose
+    AppPlayTip("Please select network.");
+    DisplayChoiceNetwork();
 }
 
 int checkInternetStatus()
@@ -312,40 +353,78 @@ int checkInternetStatus()
 	// Then check WiFi if enabled
 	if (_IS_WIFI_ENABLED_ && current_connection_type == 0)
 	{
-		fibo_sem_wait(GsemaRef);
-		ret = wifiGetLinkStatus_lib();
-		fibo_sem_signal(GsemaRef);
+	    fibo_sem_wait(GsemaRef);
+	    ret = wifiGetLinkStatus_lib();
+	    fibo_sem_signal(GsemaRef);
 
-		// WiFi is connected
-		if (ret != 4 && ret != 5 && ret != -6300 && ret != 0 && ret != -6302)
-		{
-			_IS_WIFI_READY_ = 1;
-			current_connection_type = 2;
-		}
-		else
-		{
-			_IS_WIFI_READY_ = 0;
+	    // Track WiFi connection state to detect reconnection
+	    static int previous_wifi_state = 1; // 0=disconnected, 1=connected
 
-			// Handle WiFi reconnection
-			if (ret == 4 || ret == 5)
-			{
-				static int wifi_reconnect_count = 0;
-				wifi_reconnect_count++;
+	    // WiFi is connected
+	    if (ret != 4 && ret != 5 && ret != -6300 && ret != 0 && ret != -6302)
+	    {
+	        _IS_WIFI_READY_ = 1;
+	        current_connection_type = 2;
 
-				if (wifi_reconnect_count < 3)
-				{
-					MAINLOG_L1("!!! WIFI Disconnect or AP Exception, Reconnecting (%d) !!!", wifi_reconnect_count);
-					wifiClose_lib();
-					Delay_Api(100);
-					ret = wifiOpen_lib();
-					if (ret != 0)
-					{
-						MAINLOG_L1("!!! wifiOpen_lib() failed (%d) !!!", ret);
-						AppPlayTip("Your wifi error, Smart pay will reboot");
-					}
-				}
-			}
-		}
+	        // If we were previously disconnected and now reconnected, show alert
+	        if (previous_wifi_state == 0)
+	        {
+	            // Display reconnection message
+	            ScrClrLineRam_Api(10, 11);  // Clear previous connection error messages
+	            ScrDispRam_Api(10, 0, "WI-FI Reconnected", CDISP);
+	            ScrBrush_Api();
+
+	            // Play reconnection sound
+	            AppPlayTip("WiFi connection restored");
+
+	            // Log the event
+	            MAINLOG_L1("!!! WIFI Reconnected Successfully !!!");
+
+	            // After 2 seconds, clear the reconnection message
+	            Delay_Api(3000);
+	            ScrClrLineRam_Api(10, 11);
+	            ScrBrush_Api();
+
+	            g_RefreshQRDisplay = 1;
+	        }
+
+	        previous_wifi_state = 1; // Mark as connected
+	    }
+	    else
+	    {
+	    	_IS_WIFI_READY_ = 0;
+
+	        // Only show disconnection message when state changes from connected to disconnected
+	        if (previous_wifi_state == 1)
+	        {
+	            MAINLOG_L1("!!! WIFI Connection Lost !!!");
+	        }
+
+	        previous_wifi_state = 0; // Mark as disconnected
+
+	        // Handle WiFi reconnection
+	        if (ret == 4 || ret == 5)
+	        {
+	            ScrDispRam_Api(10, 0, "WI-FI Lost", CDISP);
+	            ScrDispRam_Api(11, 0, "Try Reconnect ...", CDISP);
+	            ScrBrush_Api();
+
+	            // Always attempt reconnection, no limit on count
+	            static int wifi_reconnect_count = 0;
+	            wifi_reconnect_count++;
+
+	            // Always attempt to reconnect WiFi when it's disconnected
+	            MAINLOG_L1("!!! WIFI Disconnect or AP Exception, Reconnecting (%d) !!!", wifi_reconnect_count);
+	            wifiClose_lib();
+	            Delay_Api(100);
+	            ret = wifiOpen_lib();
+	            if (ret != 0)
+	            {
+	                MAINLOG_L1("!!! wifiOpen_lib() failed (%d) !!!", ret);
+	                AppPlayTip("Your wifi error, Smart pay will reboot");
+	            }
+	        }
+	    }
 	}
 
 	// Check if connection type has changed

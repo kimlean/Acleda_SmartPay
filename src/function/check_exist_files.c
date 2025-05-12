@@ -6,7 +6,8 @@
 #include "httpDownload.h"
 #include <stdio.h>
 
-#define SERVER_IP "103.83.163.69"
+#define SERVER_IP "103.25.92.104"
+// #define SERVER_IP "103.83.163.69"
 #define SERVER_PORT "3000"
 #define ACCESS_TOKEN "IQ5IwuSo15TavbCNd6473IL6kaQ89i72NAFuMulzXfs" //your_api_key
 #define TIMEOUT_MS 1000
@@ -53,64 +54,23 @@ void filegetlistcbtestings(const char *pchDirName, uint32 size, uint8 filetype,
 	}
 }
 //*********************************************************
-
-#define SERVER_URL "http://103.25.92.104/home/spp/upload/file/tms/Vanstone/QR/"
-#define FILE_COUNT 2
-
-void download_and_display(const char *currency) {
-	char saveLocation[256];
-	char urlDownload[256];
-
-	snprintf(saveLocation, sizeof(saveLocation), "/ext/tms/%s_%s.jpg",
-			G_sys_param.sn, currency);
-	snprintf(urlDownload, sizeof(urlDownload), "%s%s/%s_%s.jpg", SERVER_URL,
-			G_sys_param.sn, G_sys_param.sn, currency);
-
-	// MAINLOG_L1("**** Attempting to download %s image", currency);
-	int result = httpDownload(urlDownload, METHOD_GET, saveLocation);
-
-	if (result < 0) {
-		// MAINLOG_L1("**** %s Image download failed, retrying...", currency);
-		DelFile_Api(saveLocation);
-		Delay_Api(3000);
-		result = httpDownload(urlDownload, METHOD_GET, saveLocation);
-	}
-
-	if (result >= 0) {
-		// MAINLOG_L1("**** %s Image successfully downloaded", currency);
-	} else {
-		// MAINLOG_L1("**** %s Image download failed after retry", currency);
-	}
-
-	ScrCls_Api();
-	ScrDispImage_Api(saveLocation, 0, 0);
-}
-
 void check_exist_files() {
-	// MAINLOG_L1("**** Checking for existing images");
+    int iRet = -1;
+//
+    uint8 *rP = NULL;
+//
+    iRet = fileGetFileListCB_lib(TMS_FILE_DIR, filegetlistcbtestings, rP);
 
-	uint8 *rP = NULL;
-	int iRet = fileGetFileListCB_lib(TMS_FILE_DIR, filegetlistcbtestings, rP);
-
-	if (exist_or_not == 1) {
-		// MAINLOG_L1("**** Images exist, skipping download");
-	} else {
-		// MAINLOG_L1("**** No images found, initiating download");
-
-		const char *currencies[FILE_COUNT] = { "KHR", "USD" };
-
-		for (int i = 0; i < FILE_COUNT; i++) {
-			download_and_display(currencies[i]);
-			Delay_Api(2000);
-		}
-
-		exist_or_not = 0;
-	}
+    if (exist_or_not == 1) {
+        MAINLOG_L1("**** Yes Images");
+    }else{
+    	download_qr_image_main();
+    }
 }
 
 //*******************************************
 
-#define FILE_COUNT 7
+
 
 void filegetlistcbtestings_mp3(const char *pchDirName, uint32 size,
 		uint8 filetype, void *arg) {
@@ -136,6 +96,12 @@ void filegetlistcbtestings_mp3(const char *pchDirName, uint32 size,
 		}
 	}
 }
+
+/*
+ * download_mp3() - Fast and robust implementation for downloading MP3 files
+ * Incorporates robust techniques from download_QR.c with optimizations for speed
+ */
+#define FILE_COUNT 7
 
 void download_mp3() {
 

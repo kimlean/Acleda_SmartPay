@@ -1,4 +1,6 @@
 #include <MQTTClient.h>
+#include <time.h>
+#include "def.h"
 
 long currentTimeStr;
 long time_unix(){
@@ -10,8 +12,23 @@ long time_unix(){
 	return currentTimeStr;
 }
 
+char* getCurrentTimeMs() {
+    static char timeout_str[20]; // Increased buffer size for safety
+    struct timeval tv;
+
+	time_t cur_time;
+	cur_time = time(NULL);
+	sprintf(timeout_str, "%ld", (long)cur_time);
+
+    gettimeofday(&tv, NULL);
+    long long timeout_ms = ((long long)tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+    snprintf(timeout_str, sizeof(timeout_str), "%lld", timeout_ms);
+
+    return timeout_str;
+}
+
 char* getTimeOutASecound() {
-    static char timeout_str[14];  // 13 digits + 1 null terminator
+    static char timeout_str[20];
 	time_t current_time = time(NULL);
 	long long timeout_ms = ((long long)current_time + 60LL) * 1000LL;  // Add 1 hour and convert to ms
 
@@ -20,12 +37,14 @@ char* getTimeOutASecound() {
 	return timeout_str;
 }
 
-// char* getTimeOutAHour() {
-//     static char timeout_str[14];  // 13 digits + 1 null terminator
-//     time_t current_time = time(NULL);
-//     long long timeout_ms = ((long long)current_time + 3600LL) * 1000LL;  // Add 1 hour and convert to ms
+char* setTimeOutAMn() {
+    static char timeout_str[20];
+	time_t current_time = time(NULL);
+	long long timeout_ms = ((long long)current_time) * 1000LL;
 
-//     snprintf(timeout_str, sizeof(timeout_str), "%lld", timeout_ms);
+	timeout_ms += 60 * 1000;
 
-//     return timeout_str;
-// }
+	snprintf(timeout_str, sizeof(timeout_str), "%lld", timeout_ms);
+
+	return timeout_str;
+}

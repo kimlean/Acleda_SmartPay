@@ -9,6 +9,7 @@
 #include <struct.h>
 #include <poslib.h>
 #include <ctype.h>
+#include <stdio.h>
 
 POS_COM PosCom;
 
@@ -438,28 +439,40 @@ int App_CommonSelKernel() {
     if (ret != EMV_OK)
         return ret;
 
-    MAINLOG_L1("ppse.FCITemplate => ", ppse.FCITemplate);
-    snprintf(NFC_INFO.EncodeMobile,
-    		sizeof(NFC_INFO.EncodeMobile),
-			ppse.FCITemplate);
+    MAINLOG_L1("ppse.FCITemplate => %s", ppse.FCITemplate);
+    if (ppse.FCITemplate && strlen(ppse.FCITemplate) > 0)
+    {
+        // Clear buffer first
+        memset(NFC_INFO.EncodeMobile, 0, sizeof(NFC_INFO.EncodeMobile));
 
-    // Ensure null termination
-    NFC_INFO.EncodeMobile[256 -1] = '\0';
-    MAINLOG_L1("NFC_INFO.EncodeMobile => ", NFC_INFO.EncodeMobile);
-    // CLOSE CODE THE CONDITION
-    // SPLIT STRING TO VALUE
-    // SplitValueFromReadNFC(&ppse);
+        int validLength = 0;
+        // Find the index of the first non-hex character
+        for (validLength = 0; ppse.FCITemplate[validLength] != '\0'; validLength++) {
+            char c = ppse.FCITemplate[validLength];
+            if (!((c >= '0' && c <= '9') ||
+                  (c >= 'A' && c <= 'F') ||
+                  (c >= 'a' && c <= 'f'))) {
+                break;  // Stop at the first non-hex character
+            }
+        }
 
-    if (NFC_INFO.EncodeMobile != NULL) {
-    	return 0; // Custom return code for successful NFC text processing
-    }
-    else{
-    	return -1;
+        // Copy only the valid part
+        strncpy(NFC_INFO.EncodeMobile, ppse.FCITemplate, validLength < sizeof(NFC_INFO.EncodeMobile) - 1 ?
+                validLength : sizeof(NFC_INFO.EncodeMobile) - 1);
+        // Ensure null termination
+        NFC_INFO.EncodeMobile[validLength < sizeof(NFC_INFO.EncodeMobile) - 1 ?
+                              validLength : sizeof(NFC_INFO.EncodeMobile) - 1] = '\0';
+
+        MAINLOG_L1("NFC_INFO.EncodeMobile (cleaned) => %s", NFC_INFO.EncodeMobile);
+    } else {
+        MAINLOG_L1("ppse.FCITemplate is empty or null");
+        return -1;
     }
     return TYPE_KER_ERR;
 }
 
-void SplitValueFromReadNFC(COMMON_PPSE_STATUS* ppse){
+void SplitValueFromReadNFC(COMMON_PPSE_STATUS* ppse)
+{
     int i = 0, j = 0, part = 0;
 	MAINLOG_L1("SplitValueFromReadNFC: Input FCITemplate = \"%s\"", ppse->FCITemplate);
 
@@ -813,7 +826,6 @@ void initPayPassWaveConfig(int transType)
 	PayWave_SetParam_Api(&pwparm);
 	PayWave_SaveParam_Api(&pwparm);
 }
-
 
 void CTLPreProcess()
 {

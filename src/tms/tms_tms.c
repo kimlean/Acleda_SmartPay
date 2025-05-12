@@ -5,83 +5,91 @@
 #define EXTERN extern
 #include <struct.h>
 #include <poslib.h>
-#include "../inc/../inc/def.h"
-#include "../inc/httpDownload.h"
-#include "../inc/tms_md5.h"
-#include "../inc/tms_tms.h"
+#include "def.h"
+#include "httpDownload.h"
+#include "tms_md5.h"
+#include "tms_tms.h"
 
-
-static void *s;
 static unsigned char *t_sBuf=NULL;
 static unsigned char *t_rBuf=NULL;
 int Gfunflag = 0; //0-tms log not output     1-tms log output    2-unzip mp3 file
 int _tms_G_dbgOutDestApp = 0;
 
-
-static int dev_connect(URL_ENTRY *entry, int timeout)
+int TmsConnect_Api()
 {
-	int err;
+    int errCode = 0;
 
-	if (entry->protocol == PROTOCOL_HTTP)
-		s = net_connect(NULL, entry->domain, entry->port, timeout * 1000, 0, &err);
-	else
-		s = net_connect(NULL, entry->domain, entry->port, timeout * 1000, 1, &err);
+    // Use the global TMS socket if available
+    if (g_tms_socket != NULL && g_tms_socket->valid) {
+        MAINLOG_L1("Using existing TMS socket connection");
+        return 0;
+    }
 
-	if (s == NULL)
-		return CONNECT_ERROR;
+    // Otherwise establish a new connection and store it
+    g_tms_socket = net_connect(NULL, tmsEntry.domain, tmsEntry.port,
+                             CONNECT_TIMEOUT * 1000,
+                             tmsEntry.protocol == PROTOCOL_HTTPS ? 1 : 0,
+                             &errCode);
 
-	return 0;
+    if (g_tms_socket != NULL && errCode == 0) {
+        MAINLOG_L1("Stored new TMS socket connection to %s:%s",
+                  tmsEntry.domain, tmsEntry.port);
+        return 0;
+    }
+
+    MAINLOG_L1("Failed to establish TMS connection (error: %d)", errCode);
+    return errCode ? errCode : -1;
 }
 
-//return 0-success SEND_ERROR-failed
-static int dev_send(unsigned char *buf, int length)
+int TmsReceive(unsigned char *buf, int max, int timeout)
 {
-	int ret;
+    if (g_tms_socket == NULL) {
+        MAINLOG_L1("TMS socket not connected when trying to receive");
+        return RECEIVE_ERROR;
+    }
 
-	ret = net_write(s, buf, length, 0);
-	if (ret < 0)
-		return SEND_ERROR;
+    int ret = net_read(g_tms_socket, buf, max, timeout * 1000);
+    if (ret < 0) {
+        MAINLOG_L1("TMS receive error: %d", ret);
+        return RECEIVE_ERROR;
+    }
 
-	return 0;
+    return ret;
 }
 
-//return: 0-timeout      <0-failed     >0-length
-// Return bytes of received, or error
-static int dev_recv(unsigned char *buf, int max, int timeout)
+int TmsDisconnect(void)
 {
-	int ret;
+    if (g_tms_socket == NULL)
+        return 0;
 
-	ret = net_read(s, buf, max, timeout * 1000);  //return: 0-timeout      <0-failed     >0-length
-	if (ret < 0){
-		return RECEIVE_ERROR;
-	}
-
-	return ret;
+    MAINLOG_L1("Closing TMS socket connection");
+    int ret = net_close(g_tms_socket);
+    g_tms_socket = NULL;
+    return ret;
 }
 
-static int dev_disconnect(void)
+// Replace TmsSend with this improved version
+int TmsSend(unsigned char *buf, int length)
 {
-	return net_close(s);
-}
+    if (g_tms_socket == NULL) {
+        MAINLOG_L1("TmsSend: TMS socket not connected");
+        return SEND_ERROR;
+    }
 
-// For appending, offset is at the end of current file size.
-// Make sure this works for your device
-static int dev_savefile(char *filename, unsigned char *buf, int start, int len)
-{
-	WriteFile_Api(filename, buf, start, len);
-	return 0;
-}
+    MAINLOG_L1("TmsSend: Sending %d bytes to server", length);
+    int ret = net_write(g_tms_socket, buf, length, 10000); // 10 second timeout
 
-////tms part
-//Connect to host/send receive data  start
-int TmsConnect_Api() //ck
-{
-	int ret=0;
-	ret = dev_connect(&tmsEntry, CONNECT_TIMEOUT);
-	if (ret != 0){
-		return ret;
-	}
-	return 0;
+    if (ret < 0) {
+        MAINLOG_L1("TmsSend: net_write error: %d", ret);
+        return SEND_ERROR;
+    }
+    else if (ret != length) {
+        MAINLOG_L1("TmsSend: Incomplete send - sent %d of %d bytes", ret, length);
+        return SEND_ERROR;
+    }
+
+    MAINLOG_L1("TmsSend: Successfully sent %d bytes", length);
+    return 0;
 }
 
 #ifdef JUMPER_EXIST
@@ -113,179 +121,177 @@ void Tms_StopJumpSec(void)
 #endif
 }
 
-int Tms_RecvPacket(u8 *Packet, int *PacketLen, int WaitTime) //ck
+int Tms_RecvPacket(u8 *Packet, int *PacketLen, int WaitTime)
 {
-	int Ret;
-	unsigned short tlen = 0;
-	int clen, stlen;
+    int Ret;
+    unsigned short tlen = 0;
+    int clen, stlen;
 
-	while(1)
-	{
-		Tms_StartJumpSec();
-		Ret = dev_recv(Packet+tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
-		Tms_StopJumpSec();
+    while(1)
+    {
+        Tms_StartJumpSec();
+        Ret = TmsReceive(Packet+tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
+        Tms_StopJumpSec();
 
-		if (Ret <= 0) {
-			Ret = RECEIVE_ERROR;
-			break;
-		}
-		tlen += Ret;
-		clen = 0;
-		stlen = 0;
-		Ret = 0;
-		if(Tms_getContentLen(Packet, &clen, &stlen) == 0)
-		{
-			if(tlen > stlen)
-			{
-				Ret = _TMS_E_RECV_PACKET;
-				break;
-			}
-			else if(tlen == stlen)
-			{
-				*PacketLen = tlen;
-				Ret = 0;
-				break;
-			}
-		}
-	}
-	if(Ret != 0)
-		dev_disconnect();
-	return Ret;
+        if (Ret <= 0) {
+            Ret = RECEIVE_ERROR;
+            break;
+        }
+        tlen += Ret;
+        clen = 0;
+        stlen = 0;
+        Ret = 0;
+        if(Tms_getContentLen(Packet, &clen, &stlen) == 0)
+        {
+            if(tlen > stlen)
+            {
+                Ret = _TMS_E_RECV_PACKET;
+                break;
+            }
+            else if(tlen == stlen)
+            {
+                *PacketLen = tlen;
+                Ret = 0;
+                break;
+            }
+        }
+    }
+    if(Ret != 0)
+        TmsDisconnect();
+    return Ret;
 }
 
-
-int Tms_UrlRecvPacket(u8 *Packet, int *PacketLen, int WaitTime) // ck
+int Tms_UrlRecvPacket(u8 *Packet, int *PacketLen, int WaitTime)
 {
-	unsigned short len;
-	int Ret;
-	u8 *p = NULL;
-	int tlen = 0, curfidx;
-	int clen = 0, stlen=0, hflag = 0, floc = 0;
+    unsigned short len;
+    int Ret;
+    u8 *p = NULL;
+    int tlen = 0, curfidx;
+    int clen = 0, stlen=0, hflag = 0, floc = 0;
 
     curfidx = TmsTrade.curfindex;
-	floc = Tms_GetFileSize(&(TmsTrade.file[TmsTrade.curfindex]));
+    floc = Tms_GetFileSize(&(TmsTrade.file[TmsTrade.curfindex]));
 
-	while(1)
-	{
-		Tms_StartJumpSec();
-		if(hflag == 0)
-			Ret = dev_recv(Packet+tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
-		else
-			Ret = dev_recv(Packet, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
-		Tms_StopJumpSec();
-		if (Ret <= 0) {
-			Ret = RECEIVE_ERROR;
-			break;
-		}
+    while(1)
+    {
+        Tms_StartJumpSec();
+        if(hflag == 0)
+            Ret = TmsReceive(Packet+tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
+        else
+            Ret = TmsReceive(Packet, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
+        Tms_StopJumpSec();
+        if (Ret <= 0) {
+            Ret = RECEIVE_ERROR;
+            break;
+        }
 
 #ifdef DISP_STH
-		memset(tmp, 0, sizeof(tmp));
-		ScrClrLine_Api(LINE3, LINE4);
-		sprintf(tmp, "%d%% %d/%d", (TmsTrade.file[TmsTrade.curfindex].startPosi*100)/TmsTrade.file[TmsTrade.curfindex].fsize, TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].fsize);
-		ScrDisp_Api(LINE3, 0, TmsTrade.file[TmsTrade.curfindex].name, FDISP|CDISP);
-		ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);*/
+        memset(tmp, 0, sizeof(tmp));
+        ScrClrLine_Api(LINE3, LINE4);
+        sprintf(tmp, "%d%% %d/%d", (TmsTrade.file[TmsTrade.curfindex].startPosi*100)/TmsTrade.file[TmsTrade.curfindex].fsize, TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].fsize);
+        ScrDisp_Api(LINE3, 0, TmsTrade.file[TmsTrade.curfindex].name, FDISP|CDISP);
+        ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);
 #endif
-		len = Ret;
-		Ret = 0;
-		tlen += len;
-		if(hflag == 0)
-		{
-			if(Tms_getContentLen(Packet, &clen, &stlen) != 0)
-				continue;
+        len = Ret;
+        Ret = 0;
+        tlen += len;
+        if(hflag == 0)
+        {
+            if(Tms_getContentLen(Packet, &clen, &stlen) != 0)
+                continue;
 
-			if(floc+clen != TmsTrade.file[TmsTrade.curfindex].fsize)
-			{
-				Ret = _TMS_E_RECV_PACKET;
-				Tms_LstDbgOutApp("flocfloc:", (u8 *)&floc, sizeof(floc), 0);
-				Tms_LstDbgOutApp("clenclen:", (u8 *)&clen, sizeof(clen), 0);
-				Tms_LstDbgOutApp("fsize:", (u8 *)&(TmsTrade.file[TmsTrade.curfindex].fsize), sizeof(TmsTrade.file[TmsTrade.curfindex].fsize), 0);
-				break;
-			}
-			p = (u8 *)strstr((char *)Packet, "\r\n\r\n");
-			if(tlen-(p+4-Packet) > 0)
-			{
-				Ret = Tms_WriteFile(&TmsTrade.file[TmsTrade.curfindex], p+4, tlen-(p+4-Packet));
-				if(Ret != 0)
-				{
-					Ret = _TMS_E_FILE_WRITE;
-					Tms_LstDbgOutApp("Tms_WriteFile:", (u8 *)&Ret, sizeof(Ret), 0);
-					break;
-				}
+            if(floc+clen != TmsTrade.file[TmsTrade.curfindex].fsize)
+            {
+                Ret = _TMS_E_RECV_PACKET;
+                Tms_LstDbgOutApp("flocfloc:", (u8 *)&floc, sizeof(floc), 0);
+                Tms_LstDbgOutApp("clenclen:", (u8 *)&clen, sizeof(clen), 0);
+                Tms_LstDbgOutApp("fsize:", (u8 *)&(TmsTrade.file[TmsTrade.curfindex].fsize), sizeof(TmsTrade.file[TmsTrade.curfindex].fsize), 0);
+                break;
+            }
+            p = (u8 *)strstr((char *)Packet, "\r\n\r\n");
+            if(tlen-(p+4-Packet) > 0)
+            {
+                Ret = Tms_WriteFile(&TmsTrade.file[TmsTrade.curfindex], p+4, tlen-(p+4-Packet));
+                if(Ret != 0)
+                {
+                    Ret = _TMS_E_FILE_WRITE;
+                    Tms_LstDbgOutApp("Tms_WriteFile:", (u8 *)&Ret, sizeof(Ret), 0);
+                    break;
+                }
 
-				floc += (tlen-(p+4-Packet));
-			}
-			hflag = 1;
-		}
-		else
-		{
-			Ret = Tms_WriteFile(&TmsTrade.file[TmsTrade.curfindex], Packet, len);
-			if(Ret != 0)
-			{
-				Ret = _TMS_E_FILE_WRITE;
-				Tms_LstDbgOutApp("Retwr1:", (u8 *)&Ret, sizeof(Ret), 0);
-				break;
-			}
+                floc += (tlen-(p+4-Packet));
+            }
+            hflag = 1;
+        }
+        else
+        {
+            Ret = Tms_WriteFile(&TmsTrade.file[TmsTrade.curfindex], Packet, len);
+            if(Ret != 0)
+            {
+                Ret = _TMS_E_FILE_WRITE;
+                Tms_LstDbgOutApp("Retwr1:", (u8 *)&Ret, sizeof(Ret), 0);
+                break;
+            }
 
-			floc += len;
-		}
+            floc += len;
+        }
 
-		if(tlen > stlen)
-		{
-			Ret = _TMS_E_RECV_PACKET;
-			Tms_LstDbgOutApp("tlen tlen:", (u8 *)&tlen, sizeof(tlen), 0);
-			Tms_LstDbgOutApp("stlen stlen:", (u8 *)&stlen, sizeof(stlen), 0);
-			break;
-		}
-		else if(tlen == stlen)
-		{
-			Ret = 0;
-			*PacketLen = tlen;
-			Tms_LstDbgOutApp((TmsTrade.file[curfidx].name), (unsigned char*)" down over!", strlen(" down over!"), 1);
-			break;
-		}
-	}
-	if(Ret != 0)
-		dev_disconnect();
-	return Ret;
+        if(tlen > stlen)
+        {
+            Ret = _TMS_E_RECV_PACKET;
+            Tms_LstDbgOutApp("tlen tlen:", (u8 *)&tlen, sizeof(tlen), 0);
+            Tms_LstDbgOutApp("stlen stlen:", (u8 *)&stlen, sizeof(stlen), 0);
+            break;
+        }
+        else if(tlen == stlen)
+        {
+            Ret = 0;
+            *PacketLen = tlen;
+            Tms_LstDbgOutApp((TmsTrade.file[curfidx].name), (unsigned char*)" down over!", strlen(" down over!"), 1);
+            break;
+        }
+    }
+    if(Ret != 0)
+        TmsDisconnect();
+    return Ret;
+}
+
+int Tms_SendRecvPacket(u8 *SendBuf, int Senlen, u8 *RecvBuf, int *pRecvLen)
+{
+    int ret = Tms_SendRecvData(SendBuf, Senlen, RecvBuf, pRecvLen, TmsStruct.tradeTimeoutValue);
+    return ret;
 }
 
 
-int Tms_SendRecvPacket(u8 *SendBuf, int Senlen, u8 *RecvBuf, int *pRecvLen) //ck
+int Tms_SendRecvData(unsigned char *SendBuf, int Senlen, unsigned char *RecvBuf, int *RecvLen, int psWaitTime)
 {
-	int ret = Tms_SendRecvData(SendBuf, Senlen, RecvBuf, pRecvLen, TmsStruct.tradeTimeoutValue);
-	return ret;
-}
+    int ret=0;
 
+    ret = TmsSend(SendBuf, Senlen);
+    Tms_DbgOutApp("send:", SendBuf, Senlen);
+    if(ret != 0)
+    {
+        Tms_LstDbgOutApp("Tms_SendRecvData CommTxd_Api:", (u8 *)&ret, sizeof(ret), 0);
+        if(ret != 0xff)
+            return _TMS_E_SEND_PACKET;
 
-int Tms_SendRecvData( unsigned char *SendBuf, int Senlen, unsigned char *RecvBuf, int *RecvLen,int psWaitTime) //ck
-{
-	int ret=0;
+        ret = Tms_ReSend(SendBuf, Senlen);
+        if(ret != 0)
+            return _TMS_E_SEND_PACKET;
+    }
 
-	ret = dev_send(SendBuf, Senlen);
-	Tms_DbgOutApp("send:", SendBuf, Senlen);
-	if(ret != 0)
-	{
-		Tms_LstDbgOutApp("Tms_SendRecvData CommTxd_Api:", (u8 *)&ret, sizeof(ret), 0);
-		if(ret != 0xff)
-			return _TMS_E_SEND_PACKET;
-
-		ret = Tms_ReSend(SendBuf,  Senlen);
-		if(ret != 0)
-			return _TMS_E_SEND_PACKET;
-	}
-
-	*RecvLen = 0;
-	if(TmsTrade.trade_type == TYPE_URLGETFILE)
-	{
-		ret = Tms_UrlRecvPacket(RecvBuf, RecvLen, psWaitTime);
-		//Tms_LstDbgOutApp("Urlrecv22:", RecvBuf, *RecvLen, 0); //hex code   //this will make app crash
-	}
-	else
-	{
-		ret = Tms_RecvPacket(RecvBuf, RecvLen, psWaitTime);
-		Tms_DbgOutApp("Tms_RecvPacket:", RecvBuf, *RecvLen); //ascii
-	}
-	return ret;
+    *RecvLen = 0;
+    if(TmsTrade.trade_type == TYPE_URLGETFILE)
+    {
+        ret = Tms_UrlRecvPacket(RecvBuf, RecvLen, psWaitTime);
+        //Tms_LstDbgOutApp("Urlrecv22:", RecvBuf, *RecvLen, 0); //hex code   //this will make app crash
+    }
+    else
+    {
+        ret = Tms_RecvPacket(RecvBuf, RecvLen, psWaitTime);
+        Tms_DbgOutApp("Tms_RecvPacket:", RecvBuf, *RecvLen); //ascii
+    }
+    return ret;
 }
 
 ///Connect to host/send receive data  end
@@ -747,67 +753,117 @@ int Tms_Notify(void) //ck
 
 int Tms_CommProcess() //ck
 {
-	int ret=0;
+    int ret = 0;
 
-	ret = Tms_Request();
-	Tms_LstDbgOutApp("Tms_Request:", (u8 *)&ret, sizeof(ret), 0);
-	if(ret != 0)
-		return ret;
+    MAINLOG_L1("Tms_CommProcess started");
 
-	Tms_LstDbgOutApp("trade_type:", (u8 *)&TmsTrade.trade_type, sizeof(TmsTrade.trade_type), 0);
-	if(TmsTrade.trade_type == TYPE_UPDATE)
-		return 0;
+    MAINLOG_L1("Calling Tms_Request()");
+    ret = Tms_Request();
+    MAINLOG_L1("Tms_Request returned: %d", ret);
 
-	if(TmsTrade.trade_type == TYPE_NOTIFY)
-		goto _TMS_NOTIFY_;
+    Tms_LstDbgOutApp("Tms_Request:", (u8 *)&ret, sizeof(ret), 0);
+    if (ret != 0)
+    {
+        MAINLOG_L1("Tms_Request failed, exiting with ret: %d", ret);
+        return ret;
+    }
 
-	AppPlayTip("Downloading");
-	ret = Tms_DownloadUrlFilesOneByOne();
-	Tms_LstDbgOutApp("Tms_DownloadUrlFilesOneByOne:", (u8 *)&ret, sizeof(ret), 0);
-	if(ret != 0)
-		return ret;
+    MAINLOG_L1("trade_type: %d", TmsTrade.trade_type);
+    Tms_LstDbgOutApp("trade_type:", (u8 *)&TmsTrade.trade_type, sizeof(TmsTrade.trade_type), 0);
+
+    if (TmsTrade.trade_type == TYPE_UPDATE)
+    {
+        MAINLOG_L1("Trade type is TYPE_UPDATE, skipping download and notify");
+        return 0;
+    }
+
+    if (TmsTrade.trade_type == TYPE_NOTIFY)
+    {
+        MAINLOG_L1("Trade type is TYPE_NOTIFY, jumping to notification step");
+        goto _TMS_NOTIFY_;
+    }
+
+    MAINLOG_L1("Trade type requires download. Calling AppPlayTip()");
+    AppPlayTip("Downloading");
+
+    MAINLOG_L1("Calling Tms_DownloadUrlFilesOneByOne()");
+    ret = Tms_DownloadUrlFilesOneByOne();
+    MAINLOG_L1("Tms_DownloadUrlFilesOneByOne returned: %d", ret);
+
+    Tms_LstDbgOutApp("Tms_DownloadUrlFilesOneByOne:", (u8 *)&ret, sizeof(ret), 0);
+    if (ret != 0)
+    {
+        MAINLOG_L1("Download failed, exiting with ret: %d", ret);
+        return ret;
+    }
 
 _TMS_NOTIFY_:
 
-	ret = Tms_Notify();
-	if(ret == 0)
-	{
-		TmsTrade.trade_type = TYPE_UPDATE;
-		WriteFile_Api(_DOWN_STATUS_, (unsigned char *)&TmsTrade, 0, sizeof(TmsTrade));
-	}
+    MAINLOG_L1("Calling Tms_Notify()");
+    ret = Tms_Notify();
+    MAINLOG_L1("Tms_Notify returned: %d", ret);
 
- 	return ret;
+    if (ret == 0)
+    {
+        MAINLOG_L1("Notification success. Setting trade_type to TYPE_UPDATE and saving to file");
+        TmsTrade.trade_type = TYPE_UPDATE;
+        WriteFile_Api(_DOWN_STATUS_, (unsigned char *)&TmsTrade, 0, sizeof(TmsTrade));
+    }
+    else
+    {
+        MAINLOG_L1("Notification failed with ret: %d", ret);
+    }
+
+    MAINLOG_L1("Tms_CommProcess completed with ret: %d", ret);
+    return ret;
 }
 
 
 int TmsDownload_Api(u8 *appCurrVer) //ck
 {
-	int ret;
+    int ret;
 
-	t_sBuf= malloc(SENDPACKLEN);
-	if(t_sBuf == NULL)
-	{
-		Tms_LstDbgOutApp("Tms_CommProcess:", (unsigned char *)"t_sBuf malloc failed!", strlen("t_sBuf malloc failed!"), 1);
-		return _TMS_E_MALLOC_NOTENOUGH;
-	}
+    MAINLOG_L1("Starting TmsDownload_Api with version: %s", appCurrVer);
 
-	t_rBuf= malloc(RECVPACKLEN);
-	if(t_rBuf == NULL)
-	{
-		free(t_sBuf);
-		Tms_LstDbgOutApp("Tms_CommProcess:", (unsigned char *)"t_rBuf malloc failed!", strlen("t_rBuf malloc failed!"), 1);
-		return _TMS_E_MALLOC_NOTENOUGH;
-	}
+    t_sBuf = malloc(SENDPACKLEN);
+    if (t_sBuf == NULL)
+    {
+        MAINLOG_L1("t_sBuf malloc failed!");
+        Tms_LstDbgOutApp("Tms_CommProcess:", (unsigned char *)"t_sBuf malloc failed!", strlen("t_sBuf malloc failed!"), 1);
+        return _TMS_E_MALLOC_NOTENOUGH;
+    }
+    MAINLOG_L1("t_sBuf malloc success");
 
-	Tms_SetTermParam(appCurrVer);	   //set terminal paraeters according to device
-	ret = Tms_CommProcess();
-	Tms_LstDbgOutApp("Tms_CommProcess:", (u8 *)&ret, sizeof(ret), 0);
-	dev_disconnect();
-	free(t_sBuf);
-	free(t_rBuf);
+    t_rBuf = malloc(RECVPACKLEN);
+    if (t_rBuf == NULL)
+    {
+        MAINLOG_L1("t_rBuf malloc failed!");
+        free(t_sBuf);
+        Tms_LstDbgOutApp("Tms_CommProcess:", (unsigned char *)"t_rBuf malloc failed!", strlen("t_rBuf malloc failed!"), 1);
+        return _TMS_E_MALLOC_NOTENOUGH;
+    }
+    MAINLOG_L1("t_rBuf malloc success");
 
-	return ret;
+    MAINLOG_L1("Calling Tms_SetTermParam()");
+    Tms_SetTermParam(appCurrVer);  // Set terminal parameters according to device
+
+    MAINLOG_L1("Calling Tms_CommProcess()");
+    ret = Tms_CommProcess();
+    MAINLOG_L1("Tms_CommProcess returned: %d", ret);
+
+    Tms_LstDbgOutApp("Tms_CommProcess:", (u8 *)&ret, sizeof(ret), 0);
+
+    MAINLOG_L1("Calling dev_disconnect()");
+    TmsDisconnect();
+
+    MAINLOG_L1("Freeing t_sBuf and t_rBuf");
+    free(t_sBuf);
+    free(t_rBuf);
+
+    MAINLOG_L1("Returning from TmsDownload_Api with ret: %d", ret);
+    return ret;
 }
+
 
 //0:all updated   -1:no config file   -2:download uncommplete  -3:font/param download over but not update       -4:application download over but not update   -5:LIB download over but not update
 // 0 -1 :unnecessary to do anything           -2:download again       -3/-4/-5:call TmsUpdate_Api again
@@ -1046,174 +1102,171 @@ int TmsUpdate_Api(u8 *appCurrVer)
 }
 
 
-int Tms_DownloadUrlFilesOneByOne() //ck
+int Tms_DownloadUrlFilesOneByOne()
 {
-	char tmp[32], dname[64];
-	int i, Ret, curfidx;
-	int clen, stlen=0, thisLen,tlen = 0, len=0, mlen=0, sidx=0;  //sidx : start index for current request //mlen: index of current t_lbuf
-	int PackLen=0;
-	char *p = NULL;
+    char tmp[32], dname[64];
+    int i, Ret, curfidx;
+    int clen, stlen=0, thisLen,tlen = 0, len=0, mlen=0, sidx=0;
+    int PackLen=0;
+    char *p = NULL;
 
-	while((TmsTrade.file[TmsTrade.curfindex].status == STATUS_DLUNCOMPLETE) && (TmsTrade.curfindex < TmsTrade.fnum))
-	{
-		curfidx = TmsTrade.curfindex;
-		if(TmsTrade.file[TmsTrade.curfindex].startPosi > TmsTrade.file[TmsTrade.curfindex].fsize)
-		{
-			Tms_LstDbgOutApp("Dfile size wrong startPosi:", (u8 *)&TmsTrade.file[TmsTrade.curfindex].startPosi, sizeof(TmsTrade.file[TmsTrade.curfindex].startPosi), 0);
-			Tms_LstDbgOutApp("Dfile size wrong fsize:", (u8 *)&TmsTrade.file[TmsTrade.curfindex].fsize, sizeof(TmsTrade.file[TmsTrade.curfindex].fsize), 0);
-			Ret = _TMS_E_FILESIZE;
-			break;
-		}
+    while((TmsTrade.file[TmsTrade.curfindex].status == STATUS_DLUNCOMPLETE) && (TmsTrade.curfindex < TmsTrade.fnum))
+    {
+        curfidx = TmsTrade.curfindex;
+        if(TmsTrade.file[TmsTrade.curfindex].startPosi > TmsTrade.file[TmsTrade.curfindex].fsize)
+        {
+            Tms_LstDbgOutApp("Dfile size wrong startPosi:", (u8 *)&TmsTrade.file[TmsTrade.curfindex].startPosi, sizeof(TmsTrade.file[TmsTrade.curfindex].startPosi), 0);
+            Tms_LstDbgOutApp("Dfile size wrong fsize:", (u8 *)&TmsTrade.file[TmsTrade.curfindex].fsize, sizeof(TmsTrade.file[TmsTrade.curfindex].fsize), 0);
+            Ret = _TMS_E_FILESIZE;
+            break;
+        }
 
-		if(TmsTrade.file[TmsTrade.curfindex].startPosi == 0)
-		{
-			memset(&TmsTrade.context, 0, sizeof(TmsTrade.context));
-			_tms_MD5Init (&TmsTrade.context);
-			Tms_LstDbgOutApp("_tms_MD5Init:", NULL, 0, 1);
-		}
+        if(TmsTrade.file[TmsTrade.curfindex].startPosi == 0)
+        {
+            memset(&TmsTrade.context, 0, sizeof(TmsTrade.context));
+            _tms_MD5Init (&TmsTrade.context);
+            Tms_LstDbgOutApp("_tms_MD5Init:", NULL, 0, 1);
+        }
 
-		memset(dname, 0, sizeof(dname));
-		Tms_getDomainName(TmsTrade.file[TmsTrade.curfindex].filePath, dname);
+        memset(dname, 0, sizeof(dname));
+        Tms_getDomainName(TmsTrade.file[TmsTrade.curfindex].filePath, dname);
 
-		for(i=TmsTrade.file[TmsTrade.curfindex].startPosi; i<TmsTrade.file[TmsTrade.curfindex].fsize; i+=EXFCONTENT_LEN)
-		{
-			memset(t_sBuf, 0, SENDPACKLEN);
+        for(i=TmsTrade.file[TmsTrade.curfindex].startPosi; i<TmsTrade.file[TmsTrade.curfindex].fsize; i+=EXFCONTENT_LEN)
+        {
+            memset(t_sBuf, 0, SENDPACKLEN);
 
-			thisLen = (TmsTrade.file[TmsTrade.curfindex].fsize-TmsTrade.file[TmsTrade.curfindex].startPosi)>EXFCONTENT_LEN?EXFCONTENT_LEN:(TmsTrade.file[TmsTrade.curfindex].fsize-TmsTrade.file[TmsTrade.curfindex].startPosi);
+            thisLen = (TmsTrade.file[TmsTrade.curfindex].fsize-TmsTrade.file[TmsTrade.curfindex].startPosi)>EXFCONTENT_LEN?EXFCONTENT_LEN:(TmsTrade.file[TmsTrade.curfindex].fsize-TmsTrade.file[TmsTrade.curfindex].startPosi);
 
-			sprintf((char *)t_sBuf, "GET %s HTTP/1.1\r\n", TmsTrade.file[TmsTrade.curfindex].filePath);
-			strcat((char *)t_sBuf, "Accept: image/gif, image/x-xbitmap, image/jpeg, image/pjpeg, */*\r\n");
-			strcat((char *)t_sBuf, "User-Agent: Mozilla/4.0 (compatible; MSIE 5.5; Windows 98)\r\n");
-			sprintf((char *)t_sBuf+strlen((char *)t_sBuf), "Range: bytes=%d-%d\r\n", TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].startPosi+thisLen-1);
-			sprintf((char *)t_sBuf+strlen((char *)t_sBuf), "Host: %s\r\n\r\n", dname); //"ipos-n.jiewen.com.cn"
-			PackLen = strlen((char *)t_sBuf);
-			Tms_LstDbgOutApp("request:", t_sBuf, PackLen, 1);
-			Ret = dev_send(t_sBuf,  PackLen);
-			if(Ret != 0)
-			{
-				Tms_LstDbgOutApp("DUF CommTxd_Api:", (u8 *)&Ret, sizeof(Ret), 0);
-				if(Ret != 0xff)
-				{
-					Ret = _TMS_E_SEND_PACKET;
-					break;
-				}
+            sprintf((char *)t_sBuf, "GET %s HTTP/1.1\r\n", TmsTrade.file[TmsTrade.curfindex].filePath);
+            strcat((char *)t_sBuf, "Accept: image/gif, image/x-xbitmap, image/jpeg, image/pjpeg, */*\r\n");
+            strcat((char *)t_sBuf, "User-Agent: Mozilla/4.0 (compatible; MSIE 5.5; Windows 98)\r\n");
+            sprintf((char *)t_sBuf+strlen((char *)t_sBuf), "Range: bytes=%d-%d\r\n", TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].startPosi+thisLen-1);
+            sprintf((char *)t_sBuf+strlen((char *)t_sBuf), "Host: %s\r\n\r\n", dname);
+            PackLen = strlen((char *)t_sBuf);
+            Tms_LstDbgOutApp("request:", t_sBuf, PackLen, 1);
 
-				Ret = Tms_ReSend(t_sBuf,  PackLen);
-				if(Ret != 0)
-				{
-					Ret = _TMS_E_SEND_PACKET;
-					break;
-				}
-			}
+            // Use TmsSend instead of dev_send
+            Ret = TmsSend(t_sBuf, PackLen);
+            if(Ret != 0)
+            {
+                Tms_LstDbgOutApp("DUF CommTxd_Api:", (u8 *)&Ret, sizeof(Ret), 0);
+                if(Ret != 0xff)
+                {
+                    Ret = _TMS_E_SEND_PACKET;
+                    break;
+                }
 
-			tlen = 0;
-			memset(t_rBuf, 0, RECVPACKLEN);
-			while(1)
-			{
-				Tms_StartJumpSec();
-				Ret = dev_recv(t_rBuf+tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
-				Tms_StopJumpSec();
-				if (Ret <= 0) {
-					Ret = _TMS_E_RECV_PACKET;
-					break;
-				}
+                Ret = Tms_ReSend(t_sBuf, PackLen);
+                if(Ret != 0)
+                {
+                    Ret = _TMS_E_SEND_PACKET;
+                    break;
+                }
+            }
 
-				len = Ret;
-				Ret = 0;
-				//Tms_LstDbgOutApp("receive:", t_rBuf+tlen, len, 0);
-				tlen += len;
-				if(Tms_getContentLen(t_rBuf, &clen, &stlen) != 0)
-					continue;
+            tlen = 0;
+            memset(t_rBuf, 0, RECVPACKLEN);
+            while(1)
+            {
+                Tms_StartJumpSec();
+                // Use TmsReceive instead of dev_recv
+                Ret = TmsReceive(t_rBuf+tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
+                Tms_StopJumpSec();
+                if (Ret <= 0) {
+                    Ret = _TMS_E_RECV_PACKET;
+                    break;
+                }
 
+                len = Ret;
+                Ret = 0;
+                //Tms_LstDbgOutApp("receive:", t_rBuf+tlen, len, 0);
+                tlen += len;
+                if(Tms_getContentLen(t_rBuf, &clen, &stlen) != 0)
+                    continue;
 
-				if((p = strstr((char *)t_rBuf, "\n")) == NULL)  //\r\n
-					return _TMS_E_RESOLVE_PACKET;
-				memset(tmp, 0, sizeof(tmp));
-				memcpy(tmp, t_rBuf, ((unsigned char*)p)-t_rBuf);
-				if((strstr(tmp, "200") == NULL) && (strstr(tmp, "206") == NULL))
-				{
-					memset(TmsTrade.respMsg, 0, sizeof(TmsTrade.respMsg));
-					if(strlen(tmp) > (sizeof(TmsTrade.respMsg)-1))
-						memcpy(TmsTrade.respMsg, tmp, sizeof(TmsTrade.respMsg)-1);
-					else
-						memcpy(TmsTrade.respMsg, tmp, strlen(tmp));
-					return _TMS_E_TRANS_FAIL;
-				}
+                if((p = strstr((char *)t_rBuf, "\n")) == NULL)  //\r\n
+                    return _TMS_E_RESOLVE_PACKET;
+                memset(tmp, 0, sizeof(tmp));
+                memcpy(tmp, t_rBuf, ((unsigned char*)p)-t_rBuf);
+                if((strstr(tmp, "200") == NULL) && (strstr(tmp, "206") == NULL))
+                {
+                    memset(TmsTrade.respMsg, 0, sizeof(TmsTrade.respMsg));
+                    if(strlen(tmp) > (sizeof(TmsTrade.respMsg)-1))
+                        memcpy(TmsTrade.respMsg, tmp, sizeof(TmsTrade.respMsg)-1);
+                    else
+                        memcpy(TmsTrade.respMsg, tmp, strlen(tmp));
+                    return _TMS_E_TRANS_FAIL;
+                }
 
-				p = strstr((char *)t_rBuf, "\r\n\r\n");
-				if(tlen > stlen)
-				{
-					Ret = _TMS_E_RECV_PACKET;
-					break;
-				}
-				else if(tlen == stlen)
-				{
-					if((tlen-(p+4-(char *)t_rBuf)) > 0)
-					{
+                p = strstr((char *)t_rBuf, "\r\n\r\n");
+                if(tlen > stlen)
+                {
+                    Ret = _TMS_E_RECV_PACKET;
+                    break;
+                }
+                else if(tlen == stlen)
+                {
+                    if((tlen-(p+4-(char *)t_rBuf)) > 0)
+                    {
 #ifdef DISP_STH
-						ScrClrLine_Api(LINE3, LINE4);
-						memset(tmp, 0, sizeof(tmp));
-						sprintf(tmp, "%d%% %d/%d", (TmsTrade.file[TmsTrade.curfindex].startPosi*100)/TmsTrade.file[TmsTrade.curfindex].fsize, TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].fsize);
-						ScrDisp_Api(LINE3, 0, TmsTrade.file[TmsTrade.curfindex].name, FDISP|CDISP);
-						ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);
+                        ScrClrLine_Api(LINE3, LINE4);
+                        memset(tmp, 0, sizeof(tmp));
+                        sprintf(tmp, "%d%% %d/%d", (TmsTrade.file[TmsTrade.curfindex].startPosi*100)/TmsTrade.file[TmsTrade.curfindex].fsize, TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].fsize);
+                        ScrDisp_Api(LINE3, 0, TmsTrade.file[TmsTrade.curfindex].name, FDISP|CDISP);
+                        ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);
 #endif
-						Ret = Tms_WriteFile(&TmsTrade.file[TmsTrade.curfindex], (unsigned char*)(p+4), thisLen);
-						if(Ret != 0)
-						{
-							Ret = _TMS_E_FILE_WRITE;
-							Tms_LstDbgOutApp("Retwr2:", (u8 *)&Ret, sizeof(Ret), 0);
-							break;
-						}
-					}
+                        Ret = Tms_WriteFile(&TmsTrade.file[TmsTrade.curfindex], (unsigned char*)(p+4), thisLen);
+                        if(Ret != 0)
+                        {
+                            Ret = _TMS_E_FILE_WRITE;
+                            Tms_LstDbgOutApp("Retwr2:", (u8 *)&Ret, sizeof(Ret), 0);
+                            break;
+                        }
+                    }
 
-					if(Tms_NeedReConnect(t_rBuf) == 0) //reconnect
-					{
-						dev_disconnect();
-						Ret = TmsConnect_Api();
-						Tms_LstDbgOutApp("TmsConnect_Api:", (u8 *)&Ret, sizeof(Ret), 0);
-						if(Ret != 0)
-							Ret = _TMS_E_ERR_CONNECT;
-					}
-					break;
-				}
-			}//while(1)
-			if(Ret != 0)
-			{
-				Tms_LstDbgOutApp("in while:", (u8 *)&Ret, sizeof(Ret), 0);
-				break;
-			}
+                    if(Tms_NeedReConnect(t_rBuf) == 0) //reconnect
+                    {
+                        TmsDisconnect();
+                        Ret = TmsConnect_Api();
+                        Tms_LstDbgOutApp("TmsConnect_Api:", (u8 *)&Ret, sizeof(Ret), 0);
+                        if(Ret != 0)
+                            Ret = _TMS_E_ERR_CONNECT;
+                    }
+                    break;
+                }
+            }//while(1)
+            if(Ret != 0)
+            {
+                Tms_LstDbgOutApp("in while:", (u8 *)&Ret, sizeof(Ret), 0);
+                break;
+            }
 
-			if(TmsTrade.file[curfidx].startPosi > TmsTrade.file[curfidx].fsize)
-			{
-				Ret = _TMS_E_FILESIZE;
-				Tms_LstDbgOutApp("recv>real recv:", (u8 *)&TmsTrade.file[curfidx].startPosi, sizeof(TmsTrade.file[curfidx].startPosi), 0);
-				Tms_LstDbgOutApp("recv>real real:", (u8 *)&TmsTrade.file[curfidx].fsize, sizeof(TmsTrade.file[curfidx].fsize), 0);
-				break;
-			}
-			if(TmsTrade.file[curfidx].status == STATUS_DLCOMPLETE)
-			{
+            if(TmsTrade.file[curfidx].startPosi > TmsTrade.file[curfidx].fsize)
+            {
+                Ret = _TMS_E_FILESIZE;
+                Tms_LstDbgOutApp("recv>real recv:", (u8 *)&TmsTrade.file[curfidx].startPosi, sizeof(TmsTrade.file[curfidx].startPosi), 0);
+                Tms_LstDbgOutApp("recv>real real:", (u8 *)&TmsTrade.file[curfidx].fsize, sizeof(TmsTrade.file[curfidx].fsize), 0);
+                break;
+            }
+            if(TmsTrade.file[curfidx].status == STATUS_DLCOMPLETE)
+            {
 #ifdef DISP_STH
-				ScrClrLine_Api(LINE3, LINE4);
-				memset(tmp, 0, sizeof(tmp));
-				sprintf(tmp, "100%% %d/%d", TmsTrade.file[curfidx].startPosi, TmsTrade.file[curfidx].fsize);
-				ScrDisp_Api(LINE3, 0, TmsTrade.file[curfidx].name, FDISP|CDISP);
-				ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);
+                ScrClrLine_Api(LINE3, LINE4);
+                memset(tmp, 0, sizeof(tmp));
+                sprintf(tmp, "100%% %d/%d", TmsTrade.file[curfidx].startPosi, TmsTrade.file[curfidx].fsize);
+                ScrDisp_Api(LINE3, 0, TmsTrade.file[curfidx].name, FDISP|CDISP);
+                ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);
 #endif
-				break;
-			}
-		}//for - one file
-		if(Ret != 0)
-			break;
-	}//while --all files
-	if(Ret != 0)
-		dev_disconnect();
-	return Ret;
+                break;
+            }
+        }//for - one file
+        if(Ret != 0)
+            break;
+    }//while --all files
+    if(Ret != 0)
+        TmsDisconnect();
+    return Ret;
 }
-
-
-
-
-
 
 //Tms update end
 
@@ -1573,20 +1626,19 @@ int Tms_NeedReConnect(u8 *packdata) //ck
 
 
 //return:  0-success    Others-failed
-int Tms_ReConnect() //ck
+int Tms_ReConnect()
 {
-	int i, ret;
+    int i, ret;
 
-	for(i=0; i<2; i++)
-	{
-		dev_disconnect();
-		ret = TmsConnect_Api();
-		if(ret == 0)
-			break;
-	}
-	return ret;
+    for(i=0; i<2; i++)
+    {
+        TmsDisconnect();
+        ret = TmsConnect_Api();
+        if(ret == 0)
+            break;
+    }
+    return ret;
 }
-
 ////only for case 0xff
 //return : 0-success   _TMS_E_SEND_PACKET--reconnect or send failed
 int Tms_ReSend(u8 *packData, int PackLen) //ck
@@ -1602,7 +1654,7 @@ int Tms_ReSend(u8 *packData, int PackLen) //ck
 	if(ret != 0)
 		return _TMS_E_SEND_PACKET;
 
-	ret = dev_send((unsigned char *)packData,  PackLen);
+	ret = TmsSend((unsigned char *)packData,  PackLen);
 	if(ret != 0)
 	{
 		Tms_LstDbgOutApp("Tms_ReSend CommTxd_Api:", (u8 *)&ret, sizeof(ret), 0);
@@ -1776,65 +1828,99 @@ void tms_TMSThread(void)
 
 int fileMkdir_lib(char *pchDirName);
 
-int TmsTest()
+void TMSConnection(void)
 {
-	int ret;
-	char tmp[32];
+    int ret;
+    char tmp[32];
 
-	memset(tmp, 0, sizeof(tmp));
-	sprintf(tmp, "%s%s", TMS_FILE_DIR, "1e");
+    memset(tmp, 0, sizeof(tmp));
+    sprintf(tmp, "%s%s", TMS_FILE_DIR, "1e");
 
-	ret = GetFileSize_Api(tmp);
-	if(ret <= 0)
-	{
-		ret = WriteFile_Api(tmp, (unsigned char*)"exist", 0, 5);
-		if(ret != 0)
-			return ret;
-		ret = GetFileSize_Api(tmp);
-		if(ret <= 0)
-		{
-			AppPlayTip("Creating folder failed");
-			return ret;
-		}
-	}
+    ret = GetFileSize_Api(tmp);
+    if(ret <= 0)
+    {
+        ret = WriteFile_Api(tmp, (unsigned char*)"exist", 0, 5);
+        if(ret != 0)
+            return;
+        ret = GetFileSize_Api(tmp);
+        if(ret <= 0)
+        {
+            AppPlayTip("Creating folder failed");
+            return;
+        }
+    }
 
-	memset(&tmsEntry, 0, sizeof(tmsEntry));
-	tmsEntry.protocol = PROTOCOL_HTTP;
-	strcpy(tmsEntry.domain, _TMS_HOST_DOMAIN_);
-	strcpy(tmsEntry.port, _TMS_HOST_PORT_);
+    // Make sure configuration is downloaded and loaded before proceeding
+    download_config_file();
 
-	ret = TmsParamSet_Api(_TMS_HOST_IP_, _TMS_HOST_PORT_, _TMS_HOST_DOMAIN_);
-	if(ret != 0)
-	{
-		AppPlayTip("Set parameters failed");
-		return ret;
-	}
+    // Trim whitespace from port value to ensure clean comparison
+    char trimmedPort[8] = {0};
+    strncpy(trimmedPort, _TMS_HOST_PORT_, sizeof(trimmedPort) - 1);
 
-	AppPlayTip("Connecting to the server");
-	ret = dev_connect(&tmsEntry, CONNECT_TIMEOUT);
-	if (ret != 0){
-		AppPlayTip("Connect to the server failed");
-		dev_disconnect();
-		return ret;
-	}
+    // Remove leading and trailing whitespace
+    int start = 0, end = strlen(trimmedPort) - 1;
+    while(trimmedPort[start] == ' ' && start < end) start++;
+    while(trimmedPort[end] == ' ' && end > start) end--;
+    trimmedPort[end + 1] = '\0';
 
-	ret = TmsDownload_Api((u8 *)App_Msg.Version);
-	if(ret == _TMS_E_NOFILES_D)
-	{
-		AppPlayTip("Already been the latest version");
-		return ret;
-	}
-	else if(ret != 0)
-	{
-		AppPlayTip("Download failed");
-		return ret;
-	}
+    // Log current TMS settings with trimmed port
+    MAINLOG_L1("TMS Settings - Domain: %s, Port: '%s', IP: %s",
+               _TMS_HOST_DOMAIN_, trimmedPort, _TMS_HOST_IP_);
 
-	AppPlayTip("Updating");
-	ret = TmsUpdate_Api((u8 *)App_Msg.Version);
-	if(ret != 0)
-		AppPlayTip("Update failed");
-	return ret;
+    memset(&tmsEntry, 0, sizeof(tmsEntry));
+
+    // Check multiple common HTTPS port formats
+    if (strcmp(trimmedPort, "443") == 0 ||
+        strcmp(_TMS_HOST_PORT_, "443") == 0 ||
+        atoi(_TMS_HOST_PORT_) == 443) {
+        tmsEntry.protocol = PROTOCOL_HTTPS;
+        MAINLOG_L1("Using HTTPS protocol for TMS connection (port 443)");
+    } else {
+        // Default to HTTP for port 80 or any other port
+        tmsEntry.protocol = PROTOCOL_HTTP;
+        MAINLOG_L1("Using HTTP protocol for TMS connection (port %s)", _TMS_HOST_PORT_);
+    }
+
+    // Copy domain and port values
+    strcpy(tmsEntry.domain, _TMS_HOST_DOMAIN_);
+    strcpy(tmsEntry.port, trimmedPort);  // Use trimmed port
+
+    ret = TmsParamSet_Api(_TMS_HOST_IP_, trimmedPort, _TMS_HOST_DOMAIN_);
+    if(ret != 0)
+    {
+        AppPlayTip("Set parameters failed");
+        return;
+    }
+
+    AppPlayTip("Connecting to the server");
+    ret = TmsConnect_Api();
+    if (ret != 0){
+        AppPlayTip("Connect to the server failed");
+        TmsDisconnect();
+        return;
+    }
+
+    ret = TmsDownload_Api((u8 *)App_Msg.Version);
+    if(ret == _TMS_E_NOFILES_D)
+    {
+        AppPlayTip("Already been the latest version");
+        TmsDisconnect();
+        return;
+    }
+    else if(ret != 0)
+    {
+        AppPlayTip("Download failed");
+        TmsDisconnect();
+        return;
+    }
+
+    AppPlayTip("Updating");
+    ret = TmsUpdate_Api((u8 *)App_Msg.Version);
+    if(ret != 0)
+        AppPlayTip("Update failed");
+
+    TmsDisconnect();
+    return;
 }
 
 //check if update successfully
