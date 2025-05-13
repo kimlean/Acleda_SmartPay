@@ -21,6 +21,8 @@
 #include "httpDownload.h"
 #include "EmvCommon.h"
 
+#include "tms_tms.h"
+
 // EMQX broker settings
 //#define MQTT_BROKER "172.17.199.46"
 //#define MQTT_PORT "1883"           // Use "8883" for TLS
@@ -40,6 +42,7 @@
 
 // MQTT Session settings
 #define HEARTBEAT_INTERVAL 2      // Seconds between heartbeats
+#define DELETE_FILE        60
 #define MQTT_KEEPALIVE 60          // MQTT keepalive in seconds
 #define MAX_RECONNECT_DELAY 5000   // Maximum reconnect delay in ms
 #define INITIAL_RECONNECT_DELAY 500 // Initial reconnect delay in ms
@@ -95,7 +98,6 @@ time_t delete_file(time_t currentTime, time_t startTime) {
 }
 
 void deleteAll(void) {
-
 	MAINLOG_L1("Process delete file");
     uint8 *rP = NULL;
     folderFileDisplay((unsigned char*) TMS_FILE_DIR);
@@ -409,9 +411,11 @@ static void onTopicMessageArrived(MessageData *md) {
     else if (strcmp(type, "DOWN_QR") == 0) {
         // Download QR
         MAINLOG_L1("Download QR command received");
+        TmsTrade.trade_type = TYPE_QR;
+        TmsDownload_Api((u8 *)App_Msg.Version);
 //        check_exist_files();
-        download_qr_image_main();
-        initQRImage();
+//        download_qr_image_main();
+//        initQRImage();
     }
     else if (strcmp(type, "DEL_MP3") == 0) {
         // Delete MP3
@@ -586,6 +590,7 @@ void mQTTMainThread(void) {
     int connection_attempts = 0;
     int current_retry_delay = INITIAL_RECONNECT_DELAY;
     time_t lastHeartbeat = 0;
+    time_t lastDeleteFile = 0;
     time_t sessionStartTime = 0;
     char clientID[64];
     char command_topic[64];
@@ -713,6 +718,7 @@ void mQTTMainThread(void) {
         isNetworkConnected = 1;
         sessionStartTime = time(NULL);
         lastHeartbeat = sessionStartTime;
+        lastDeleteFile = sessionStartTime;
         PlayMP3File("IoT_Sucess_connect.mp3");
 
         // Reset reconnect flag
@@ -728,11 +734,14 @@ void mQTTMainThread(void) {
             if (currentTime - lastHeartbeat >= HEARTBEAT_INTERVAL) {
                 publishHeartbeat(&c, sessionStartTime);
                 lastHeartbeat = currentTime;
-
-                // CLEAR ALL SOUND WAS PLAYED EVERY 1MN
-                fileFilter = 0;
-                deleteAll();
             }
+
+            if (currentTime - lastDeleteFile >= DELETE_FILE) {
+			   // CLEAR ALL SOUND WAS PLAYED EVERY 1MN
+			   fileFilter = 0;
+			   deleteAll();
+			   lastDeleteFile = currentTime;
+ 		   }
 
             // Check for errors
             if (ret < 0) {

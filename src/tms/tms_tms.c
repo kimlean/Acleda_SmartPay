@@ -15,6 +15,8 @@ static unsigned char *t_rBuf=NULL;
 int Gfunflag = 0; //0-tms log not output     1-tms log output    2-unzip mp3 file
 int _tms_G_dbgOutDestApp = 0;
 
+struct __TmsTrade__ TmsTrade;
+
 int TmsConnect_Api()
 {
     int errCode = 0;
@@ -281,10 +283,9 @@ int Tms_SendRecvData(unsigned char *SendBuf, int Senlen, unsigned char *RecvBuf,
     }
 
     *RecvLen = 0;
-    if(TmsTrade.trade_type == TYPE_URLGETFILE)
+    if(TmsTrade.trade_type == TYPE_URLGETFILE || TmsTrade.trade_type == TYPE_QR)
     {
         ret = Tms_UrlRecvPacket(RecvBuf, RecvLen, psWaitTime);
-        //Tms_LstDbgOutApp("Urlrecv22:", RecvBuf, *RecvLen, 0); //hex code   //this will make app crash
     }
     else
     {
@@ -315,18 +316,23 @@ int Tms_CreatePacket(u8 * packData, int * packLen) //ck
 
 	switch(TmsTrade.trade_type)
 	{
-	case TYPE_CHECKVERSION:   //http://aipos-s.jiewen.com.cn/tms/checkVersion
-		sprintf((char *)urlPath, "POST /tms/checkVersion"); //POST /tms/checkVersion
-		break;
-	case TYPE_NOTIFY:
-		sprintf((char *)urlPath, "POST /tms/resultNotify");  //POST /spp/tms/resultNotify
-		if(Tms_CheckDownloadOver() == 0)
-			cJSON_AddStringToObject(root, "upgradeResult", "00");
-		else
-			cJSON_AddStringToObject(root, "upgradeResult", "99");
-		break;
-	default:
-		break;
+		case TYPE_CHECKVERSION:   //http://aipos-s.jiewen.com.cn/tms/checkVersion
+			sprintf((char *)urlPath, "POST /tms/checkVersion"); //POST /tms/checkVersion
+			break;
+		case TYPE_NOTIFY:
+			sprintf((char *)urlPath, "POST /tms/resultNotify");  //POST /spp/tms/resultNotify
+			if(Tms_CheckDownloadOver() == 0)
+				cJSON_AddStringToObject(root, "upgradeResult", "00");
+			else
+				cJSON_AddStringToObject(root, "upgradeResult", "99");
+			break;
+		case TYPE_QR:
+			sprintf((char *)urlPath,  "GET /tms/Vanstone/QR/%s/%s_KHR.zip",
+					G_sys_param.sn,
+					G_sys_param.sn);
+			break;
+		default:
+			break;
 	}
 
 	out = cJSON_PrintUnformatted(root);
@@ -341,16 +347,21 @@ int Tms_CreatePacket(u8 * packData, int * packLen) //ck
 	memset(buf, 0x20, sizeof(buf));
 	memcpy(tmp, TmsStruct.sn, strlen(TmsStruct.sn));
 	memcpy(buf, timestamp, strlen((char *)timestamp));
+
 	for(i=0; i<50; i++)
 		tmp[i] ^= buf[i];
+
 	memset(buf, 0x20, sizeof(buf));
 	memcpy(buf, "998876511QQQWWeerASDHGJKL", strlen("998876511QQQWWeerASDHGJKL"));
+
 	for(i=0; i<50; i++)
 		tmp[i] ^= buf[i];
+
 	tmp[50] = 0;
 	memset(buf, 0, sizeof(buf));
 	memset(md5src, 0, sizeof(md5src));
 	memcpy(md5src, out, dataLen);
+
 	BcdToAsc_Api((char *)(md5src+dataLen), (unsigned char *)tmp, 100);
 	_tms_MDString((char *)md5src,(unsigned char *)buf);
 	memset(tmp, 0, sizeof(tmp));
@@ -610,7 +621,13 @@ int Tms_Request(void) //ck
 
 	memset(TmsTrade.respCode, 0, sizeof(TmsTrade.respCode));
 	memset(TmsTrade.respMsg, 0, sizeof(TmsTrade.respMsg));
-	TmsTrade.trade_type = TYPE_CHECKVERSION;
+
+	if(TmsTrade.trade_type != TYPE_QR)
+		TmsTrade.trade_type = TYPE_CHECKVERSION;
+	else
+		TmsConnect_Api();
+
+	MAINLOG_L1("TmsTrade.trade_type %d", TmsTrade.trade_type);
 
 	memset(t_sBuf, 0, SENDPACKLEN);
 	ret = Tms_CreatePacket(t_sBuf, &PackLen);
@@ -912,6 +929,16 @@ int TmsStatusCheck_Api(u8 *appCurrVer) //ck
 						return -5;
 					}
 				}
+			}
+			else if (strcmp(GFfile.file[i].type, TYPE_QR_STR) == 0)
+			{
+				char srcPath[256];
+				/* downloaded into your standard dir (e.g. TMS_FILE_DIR) */
+				sprintf(srcPath, "%s%s", TMS_FILE_DIR, GFfile.file[i].name);
+				/* unzip into /ext/tms/ as requested */
+				fileunZip_lib((unsigned char*)srcPath, "/ext/tms/");
+				/* optionally delete the zip */
+				DelFile_Api(srcPath);
 			}
 		}
 	}
@@ -1624,7 +1651,6 @@ int Tms_NeedReConnect(u8 *packdata) //ck
 	return -1;
 }
 
-
 //return:  0-success    Others-failed
 int Tms_ReConnect()
 {
@@ -1663,7 +1689,6 @@ int Tms_ReSend(u8 *packData, int PackLen) //ck
 	return ret;
 }
 
-
 //Other functions end
 
 //OnorOff: output or not : 0-off; 1-on;
@@ -1677,7 +1702,6 @@ void OutputLogSwitch(int OnorOff, int logDest) //ck
 		Gfunflag = 0;
 	_tms_G_dbgOutDestApp = logDest;
 }
-
 
 #define LOGSPCS_BYTES 450  //MAINLOG_L1 support 1k at most
 #define LOGPRINT_MALLOC 1024
@@ -1800,6 +1824,10 @@ void Tms_DbgOutApp(const char *title, unsigned char *pData, int dLen) //ck
 	}
 }
 
+//int TmsTest();
+
+///tms part
+
 void tms_TMSThread(void)
 {
 	int ret;
@@ -1810,7 +1838,13 @@ void tms_TMSThread(void)
 			Delay_Api(1000);
 		}
 
+		// MAINLOG_L1("TagTms_start tms download");
+//        DelFile_Api("/ext/tms/");
 		ret = TmsTest();
+		// MAINLOG_L1("TagTms_ret123456789 %d", ret);
+        // MAINLOG_L1("TagTms_ret111111111 %d", ret);
+//        CustomizedKHQR();
+        // MAINLOG_L1("TagTms_ret222222222 %d", ret);
         tms_tms_flag = 0;
 
 	}

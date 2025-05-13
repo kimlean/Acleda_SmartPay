@@ -3,7 +3,7 @@
 
 #define EXTERN extern
 #define MQTT_PACKET_LEN 640
-
+#define	MAX_PATH_LENGTH		128
 #define BATER_WARM	   15
 #define BATER_POWR_OFF 3
 
@@ -77,6 +77,14 @@ typedef struct {
 #define MAX_SOCKETS 10
 #define CERTI_LEN  1024*2
 
+typedef struct {
+	int protocol;
+	char domain[MAX_DOMAIN_LENGTH];
+	char path[MAX_PATH_LENGTH];
+	char port[8];
+} URL_ENTRY;
+
+extern int parseURL(char *url, URL_ENTRY *entry);
 // Global socket slots for connection reuse
 extern NET_SOCKET_PRI sockets[MAX_SOCKETS];
 

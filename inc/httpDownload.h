@@ -3,7 +3,7 @@
 
 // The following macros can be configured to adapt field requirements
 #define	MAX_DOMAIN_LENGTH	128
-#define	MAX_PATH_LENGTH		128
+
 #define	CONNECT_TIMEOUT		10
 #define	RECEIVE_TIMEOUT		30
 #define	RECEIVE_BUF_SIZE	20480
@@ -28,7 +28,6 @@
 #define FILE_CERT_ROOT	"/ext/ca.pem"
 #define FILE_CERT_CHAIN "/ext/cli.crt"
 #define FILE_CERT_PRIVATE "/ext/pri.key"
-
 
 /*
  * Can only support the following url format:

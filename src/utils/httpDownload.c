@@ -13,14 +13,7 @@
 #define	PROTOCOL_HTTP	0
 #define	PROTOCOL_HTTPS	1
 
-typedef struct {
-	int protocol;
-	char domain[MAX_DOMAIN_LENGTH];
-	char path[MAX_PATH_LENGTH];
-	char port[8];
-} URL_ENTRY;
-
-static int parseURL(char *url, URL_ENTRY *entry)
+int parseURL(char *url, URL_ENTRY *entry)
 {
 	char *p, *p2;
 
@@ -278,7 +271,6 @@ relocate_301:
         p = strstr((char *)buf, "\r\n");
         if (!p) {
             MAINLOG_L1("Status line incomplete, continuing to receive...");
-            Delay_Api(500);
             continue; // Not complete, continue receiving
         }
 

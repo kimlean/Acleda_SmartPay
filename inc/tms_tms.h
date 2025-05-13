@@ -8,6 +8,8 @@
 #include "def.h"
 #include "tms_md5.h"
 
+#define STATUS_DLCOMPLETE   1  // download complete
+#define STATUS_UPDATE       2  // already updated
 
 //#define __Q181L__  		//defined in "def.h"
 #define TMSFILE_EXTPATH   //save tms file into external path or internalpath  open-external  close-internal
@@ -43,6 +45,7 @@
 #define TYPE_FONT	"WS" //font 
 #define TYPE_PARAM  "PF" //common file/parameters file   //CK-�������
 #define TYPE_FIRMWARE  "UF" //  UF-firmware 
+#define TYPE_QR_STR    "QR"
 
 #define MACHINE_Q181L	"Q181L"
 #define MACHINE_Q181E	"Q181E"
@@ -81,7 +84,8 @@ enum TRADE_TYPE
 	TYPE_CHECKVERSION = 1,
 	TYPE_URLGETFILE, 
 	TYPE_NOTIFY,
-	TYPE_UPDATE
+	TYPE_UPDATE,
+	TYPE_QR
 }; 
 
 enum TRADEHOST_MODE
@@ -134,12 +138,6 @@ struct __TmsStruct__   //Open for Clients  //M-mandatory   O-Optional
 
 #define	MAX_DOMAIN_LENGTH	128
 #define	MAX_PATH_LENGTH		128
-typedef struct {
-	int protocol;
-	char domain[MAX_DOMAIN_LENGTH];
-	char path[MAX_PATH_LENGTH];
-	char port[8];
-} URL_ENTRY;
 
 extern int Tms_logflag;
 URL_ENTRY tmsEntry;

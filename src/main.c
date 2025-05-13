@@ -112,6 +112,7 @@ void InitSys(void) {
 
     initQRImage();
 
+    // CLOSE TEST CODE
     TMSConnection();
 
     /* Initialize data structures */
