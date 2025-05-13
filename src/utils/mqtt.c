@@ -364,12 +364,6 @@ static void onTopicMessageArrived(MessageData *md) {
         // fileFilter = 0;
         // deleteAll();
 
-        // KIMLEAN : PREPARE CODE TO DELETED MP3 FAST
-//        char filePathRemove[64];
-//		memset(filePathRemove, 0, sizeof(filePathRemove));
-//		sprintf(filePathRemove, "/ext/tms/%s", fileName);
-//
-//        ret = DelFile_Api(filePathRemove);
         cJSON_Delete(root);
         return;
     }
@@ -582,6 +576,7 @@ void publishHeartbeat(MQTTClient* client, time_t sessionStartTime) {
     MAINLOG_L1("Published heartbeat");
 }
 
+// Modified mQTTMainThread function for robust socket management
 void mQTTMainThread(void) {
     Network n;
     MQTTClient c;
@@ -629,21 +624,43 @@ void mQTTMainThread(void) {
         // Generate unique client ID
         sprintf(clientID, "%s", G_sys_param.sn);
 
-        // Connect to MQTT broker
-        MAINLOG_L1("Connecting to MQTT broker %s:%s", G_sys_param.mqtt_server, G_sys_param.mqtt_port);
+        // Check if we can reuse existing socket
+        if (g_mqtt_socket != NULL && g_mqtt_socket->valid &&
+            strcmp(g_mqtt_socket->host, G_sys_param.mqtt_server) == 0 &&
+            strcmp(g_mqtt_socket->port, G_sys_param.mqtt_port) == 0) {
 
-        n.netContext = n.mqttconnect(NULL, G_sys_param.mqtt_server, G_sys_param.mqtt_port,
-        						10000, G_sys_param.mqtt_ssl, &err);
+            MAINLOG_L1("Reusing existing MQTT socket connection");
+            n.netContext = g_mqtt_socket;
+            err = 0;
+        } else {
+            // If existing socket is invalid or for different host, ensure it's closed
+            if (g_mqtt_socket != NULL) {
+                MAINLOG_L1("Closing existing invalid MQTT socket before creating new one");
+                net_close(g_mqtt_socket);
+                g_mqtt_socket = NULL;
+            }
+
+            // Connect to MQTT broker with fresh socket
+            MAINLOG_L1("Creating new MQTT connection to %s:%s",
+                      G_sys_param.mqtt_server, G_sys_param.mqtt_port);
+
+            n.netContext = n.mqttconnect(NULL, G_sys_param.mqtt_server, G_sys_param.mqtt_port,
+                                        10000, G_sys_param.mqtt_ssl, &err);
+        }
 
         // Store in global reference if connection successful
         if (n.netContext != NULL && err == 0) {
             g_mqtt_socket = n.netContext;
             MAINLOG_L1("Stored new MQTT socket connection");
-        }
-
-        if (n.netContext == NULL) {
+        } else {
             MAINLOG_L1("MQTT connection failed (err=%d), retrying in %d ms",
-                     err, current_retry_delay);
+                       err, current_retry_delay);
+            // Ensure any partial connection is properly closed
+            if (n.netContext != NULL) {
+                net_close(n.netContext);
+                n.netContext = NULL;
+                g_mqtt_socket = NULL;
+            }
             Delay_Api(current_retry_delay);
             current_retry_delay = (current_retry_delay * 2 < MAX_RECONNECT_DELAY) ?
                                  current_retry_delay * 2 : MAX_RECONNECT_DELAY;
@@ -661,8 +678,12 @@ void mQTTMainThread(void) {
         if (ret != 0) {
             MAINLOG_L1("MQTT connect failed with error %d", ret);
             MQTTDisconnect(&c);
+
+            // Clean disconnect and reset references
+            net_close(n.netContext);
             n.netContext = NULL;
-            n.mqttclose(n.netContext);
+            g_mqtt_socket = NULL;
+
             Delay_Api(current_retry_delay);
             continue;
         }
@@ -670,15 +691,16 @@ void mQTTMainThread(void) {
         // Subscribe to topics
         ret = MQTTSubscribe(&c, G_sys_param.mqtt_topic, G_sys_param.mqtt_qos, onTopicMessageArrived);
 
-        //sprintf(command_topic, "commands_%s", G_sys_param.sn);
-        //ret |= MQTTSubscribe(&c, command_topic, 1, onCommandMessageArrived);
-
         if (ret != 0) {
             MAINLOG_L1("MQTT subscribe failed with error %d", ret);
             isNetworkConnected = 0;
             MQTTDisconnect(&c);
+
+            // Clean disconnect and reset references
+            net_close(n.netContext);
             n.netContext = NULL;
-            n.mqttclose(n.netContext);
+            g_mqtt_socket = NULL;
+
             Delay_Api(current_retry_delay);
             continue;
         }
@@ -709,7 +731,7 @@ void mQTTMainThread(void) {
 
                 // CLEAR ALL SOUND WAS PLAYED EVERY 1MN
                 fileFilter = 0;
-				deleteAll();
+                deleteAll();
             }
 
             // Check for errors
@@ -732,8 +754,11 @@ void mQTTMainThread(void) {
         // Clean disconnect
         isNetworkConnected = 0;
         MQTTDisconnect(&c);
+
+        // Properly close socket and reset references
+        net_close(n.netContext);
         n.netContext = NULL;
-        n.mqttclose(n.netContext);
+        g_mqtt_socket = NULL;
 
         // Delay before reconnecting
         Delay_Api(1000);

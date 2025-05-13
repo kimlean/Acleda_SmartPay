@@ -87,65 +87,6 @@ static int parseURL(char *url, URL_ENTRY *entry)
 	return 0;
 }
 
-static void *s;
-static int dev_connect(URL_ENTRY *entry, int timeout)
-{
-	int err;
-
-	if (entry->protocol == PROTOCOL_HTTP){
-		s = net_connect(NULL, entry->domain, entry->port, timeout * 1000, 0, &err);
-		// MAINLOG_L1("####### HTTP %d",s);
-	}else{
-		s = net_connect(NULL, entry->domain, entry->port, timeout * 1000, 1, &err);
-		// MAINLOG_L1("####### HTTPS %d",s);
-	}
-
-	if (s == NULL){
-		// MAINLOG_L1("####### S==NULL %d",s);
-		return CONNECT_ERROR;
-	}
-
-	return 0;
-}
-
-static int dev_send(unsigned char *buf, int length)
-{
-	int ret;
-
-	ret = net_write(s, buf, length, 0);
-	if (ret < 0)
-		return SEND_ERROR;
-
-	return 0;
-}
-
-// Return bytes of received, or error
-static int dev_recv(unsigned char *buf, int max, int timeout)
-{
-	int ret;
-
-	ret = net_read(s, buf, max, timeout * 1000);
-	if (ret < 0)
-		return RECEIVE_ERROR;
-
-	return ret;
-}
-
-static int dev_disconnect(void)
-{
-	return net_close(s);
-}
-
-// For appending, offset is at the end of current file size.
-// Make sure this works for your device
-static int dev_savefile(char *filename, unsigned char *buf, int start, int len)
-{
-
-	// MAINLOG_L1("Savefile %d at %d", len, start);
-	WriteFile_Api(filename, buf, start, len);
-	return 0;
-}
-
 // Remove the space in the begining and end of the str
 static char *trim(char *str)
 {
@@ -168,6 +109,10 @@ static char *trim(char *str)
 	return str + start;
 }
 
+
+// Use a smaller buffer size to reduce memory usage
+#define OPTIMIZED_BUF_SIZE (1024 * 4)
+
 // Partial download
 // Return content length downloaded or error
 static int __httpDownload(char *url, int method, char *filename, int start, int end)
@@ -178,9 +123,6 @@ static int __httpDownload(char *url, int method, char *filename, int start, int 
     int chunked_total = 0;
     char *p, *p1, *p2;
     void *netContext = NULL;
-
-    // Use a smaller buffer size to reduce memory usage
-	#define OPTIMIZED_BUF_SIZE (1024 * 4)
 
     unsigned char *buf = NULL;
 
@@ -336,6 +278,7 @@ relocate_301:
         p = strstr((char *)buf, "\r\n");
         if (!p) {
             MAINLOG_L1("Status line incomplete, continuing to receive...");
+            Delay_Api(500);
             continue; // Not complete, continue receiving
         }
 

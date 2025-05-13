@@ -58,7 +58,6 @@ void initParmSystem(){
     initDeviceType();
     initMqttOs();
     initLib();
-    initQRImage();
     initThanksMode();
 
     // SMALL SCREEN INIT
@@ -111,6 +110,8 @@ void InitSys(void) {
     download_config_dB();
     check_exist_files();
 
+    initQRImage();
+
     TMSConnection();
 
     /* Initialize data structures */
@@ -122,7 +123,7 @@ void InitSys(void) {
 
     /* Create threads */
     fibo_thread_create(MenuThread, "MenuThread", 14 * 1024, NULL, 24);
-    fibo_thread_create(ActionRefresh_Tread, "ActionRefresh_Tread", 14 * 1024, NULL, 24);
+    fibo_thread_create(ActionRefresh_Tread, "ActionRefresh_Tread", 8 * 1024, NULL, 24);
 
     /* Create synchronization semaphore */
     GsemaRef = fibo_sem_new(1);

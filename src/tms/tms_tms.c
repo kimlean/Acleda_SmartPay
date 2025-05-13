@@ -1800,10 +1800,6 @@ void Tms_DbgOutApp(const char *title, unsigned char *pData, int dLen) //ck
 	}
 }
 
-//int TmsTest();
-
-///tms part
-
 void tms_TMSThread(void)
 {
 	int ret;
@@ -1814,13 +1810,7 @@ void tms_TMSThread(void)
 			Delay_Api(1000);
 		}
 
-		// MAINLOG_L1("TagTms_start tms download");
-//        DelFile_Api("/ext/tms/");
 		ret = TmsTest();
-		// MAINLOG_L1("TagTms_ret123456789 %d", ret);
-        // MAINLOG_L1("TagTms_ret111111111 %d", ret);
-//        CustomizedKHQR();
-        // MAINLOG_L1("TagTms_ret222222222 %d", ret);
         tms_tms_flag = 0;
 
 	}

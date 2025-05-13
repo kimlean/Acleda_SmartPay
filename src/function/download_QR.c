@@ -51,6 +51,8 @@ int download_image_with_retry(const char* url, const char* savePath, int maxRetr
         }
 
         // Attempt download
+        MAINLOG_L1("Downloading Image from: %s", url);
+        MAINLOG_L1("Save at Image from: %s", savePath);
         result = httpDownload(url, METHOD_GET, savePath);
 
         // Check result
@@ -263,8 +265,6 @@ int download_multiple_qr_images(const char* serverHost, const char* serverPath) 
         Delay_Api(1000);
         ScrBrush_Api();
         ScrDispImage_Api(KHQRBMP, 0, 0);
-
-
     }
 
     return successCount;
