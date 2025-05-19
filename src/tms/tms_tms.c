@@ -15,8 +15,6 @@ static unsigned char *t_rBuf=NULL;
 int Gfunflag = 0; //0-tms log not output     1-tms log output    2-unzip mp3 file
 int _tms_G_dbgOutDestApp = 0;
 
-struct __TmsTrade__ TmsTrade;
-
 int TmsConnect_Api()
 {
     int errCode = 0;
@@ -51,6 +49,7 @@ int TmsReceive(unsigned char *buf, int max, int timeout)
     }
 
     int ret = net_read(g_tms_socket, buf, max, timeout * 1000);
+    MAINLOG_L1("net_read return status : %d", ret);
     if (ret < 0) {
         MAINLOG_L1("TMS receive error: %d", ret);
         return RECEIVE_ERROR;
@@ -264,7 +263,6 @@ int Tms_SendRecvPacket(u8 *SendBuf, int Senlen, u8 *RecvBuf, int *pRecvLen)
     return ret;
 }
 
-
 int Tms_SendRecvData(unsigned char *SendBuf, int Senlen, unsigned char *RecvBuf, int *RecvLen, int psWaitTime)
 {
     int ret=0;
@@ -283,9 +281,10 @@ int Tms_SendRecvData(unsigned char *SendBuf, int Senlen, unsigned char *RecvBuf,
     }
 
     *RecvLen = 0;
-    if(TmsTrade.trade_type == TYPE_URLGETFILE || TmsTrade.trade_type == TYPE_QR)
+    if(TmsTrade.trade_type == TYPE_URLGETFILE)
     {
         ret = Tms_UrlRecvPacket(RecvBuf, RecvLen, psWaitTime);
+        //Tms_LstDbgOutApp("Urlrecv22:", RecvBuf, *RecvLen, 0); //hex code   //this will make app crash
     }
     else
     {
@@ -297,7 +296,6 @@ int Tms_SendRecvData(unsigned char *SendBuf, int Senlen, unsigned char *RecvBuf,
 
 ///Connect to host/send receive data  end
 
-
 //Create Resolve package start
 int Tms_CreatePacket(u8 * packData, int * packLen) //ck
 {
@@ -307,6 +305,21 @@ int Tms_CreatePacket(u8 * packData, int * packLen) //ck
 	u8 buf[64], tmp[64], timestamp[16], urlPath[128], md5src[1024];
 
 	memset(urlPath, 0, sizeof(urlPath));
+	if (TmsTrade.trade_type == TYPE_QR) {
+		sprintf((char *)urlPath, "GET %s", TmsTrade.file[0].filePath);
+		memcpy((char *)packData, urlPath, strlen((char *)urlPath));
+		strcat((char *)packData, " HTTP/1.1\r\n");
+		sprintf((char *)packData+strlen((char *)packData), "Host: %s\r\n", TmsStruct.hostDomainName);
+		strcat((char *)packData, "Accept: */*\r\n");
+		strcat((char *)packData, "Connection: Keep-Alive\r\n");
+		strcat((char *)packData, "User-Agent: Mozilla/4.0(compatible; MSIE 5.5; Windows 98)\r\n");
+		strcat((char *)packData, "Accept-Encoding: gzip,deflate\r\n\r\n");
+
+		*packLen = strlen((char *)packData);
+		return 0;
+	}
+
+	// VENDOR CODE
 	root = cJSON_CreateObject();
 
 	cJSON_AddStringToObject((cJSON *)root, "version", TmsStruct.version);   //version is unuseful
@@ -316,23 +329,18 @@ int Tms_CreatePacket(u8 * packData, int * packLen) //ck
 
 	switch(TmsTrade.trade_type)
 	{
-		case TYPE_CHECKVERSION:   //http://aipos-s.jiewen.com.cn/tms/checkVersion
-			sprintf((char *)urlPath, "POST /tms/checkVersion"); //POST /tms/checkVersion
-			break;
-		case TYPE_NOTIFY:
-			sprintf((char *)urlPath, "POST /tms/resultNotify");  //POST /spp/tms/resultNotify
-			if(Tms_CheckDownloadOver() == 0)
-				cJSON_AddStringToObject(root, "upgradeResult", "00");
-			else
-				cJSON_AddStringToObject(root, "upgradeResult", "99");
-			break;
-		case TYPE_QR:
-			sprintf((char *)urlPath,  "GET /tms/Vanstone/QR/%s/%s_KHR.zip",
-					G_sys_param.sn,
-					G_sys_param.sn);
-			break;
-		default:
-			break;
+	case TYPE_CHECKVERSION:   //http://aipos-s.jiewen.com.cn/tms/checkVersion
+		sprintf((char *)urlPath, "POST /tms/checkVersion"); //POST /tms/checkVersion
+		break;
+	case TYPE_NOTIFY:
+		sprintf((char *)urlPath, "POST /tms/resultNotify");  //POST /spp/tms/resultNotify
+		if(Tms_CheckDownloadOver() == 0)
+			cJSON_AddStringToObject(root, "upgradeResult", "00");
+		else
+			cJSON_AddStringToObject(root, "upgradeResult", "99");
+		break;
+	default:
+		break;
 	}
 
 	out = cJSON_PrintUnformatted(root);
@@ -347,21 +355,16 @@ int Tms_CreatePacket(u8 * packData, int * packLen) //ck
 	memset(buf, 0x20, sizeof(buf));
 	memcpy(tmp, TmsStruct.sn, strlen(TmsStruct.sn));
 	memcpy(buf, timestamp, strlen((char *)timestamp));
-
 	for(i=0; i<50; i++)
 		tmp[i] ^= buf[i];
-
 	memset(buf, 0x20, sizeof(buf));
 	memcpy(buf, "998876511QQQWWeerASDHGJKL", strlen("998876511QQQWWeerASDHGJKL"));
-
 	for(i=0; i<50; i++)
 		tmp[i] ^= buf[i];
-
 	tmp[50] = 0;
 	memset(buf, 0, sizeof(buf));
 	memset(md5src, 0, sizeof(md5src));
 	memcpy(md5src, out, dataLen);
-
 	BcdToAsc_Api((char *)(md5src+dataLen), (unsigned char *)tmp, 100);
 	_tms_MDString((char *)md5src,(unsigned char *)buf);
 	memset(tmp, 0, sizeof(tmp));
@@ -373,7 +376,8 @@ int Tms_CreatePacket(u8 * packData, int * packLen) //ck
 	strcat((char *)packData, "Content-Type: application/json;charset=UTF-8\r\n");
 	sprintf((char *)packData+strlen((char *)packData), "Host: %s\r\n", TmsStruct.hostDomainName);
 	strcat((char *)packData, "Connection: Keep-Alive\r\n");
-	strcat((char *)packData, "User-Agent: Apache-HttpClient/4.3.5 (java 1.5)\r\n");
+//    strcat((char *)packData, "User-Agent: Apache-HttpClient/4.3.5 (java 1.5)\r\n");
+	strcat((char *)packData, "User-Agent: Mozilla/4.0(compatible; MSIE 5.5; Windows 98)\r\n");
 	strcat((char *)packData, "Accept-Encoding: gzip,deflate\r\n\r\n");
 	memcpy(packData+strlen((char *)packData), out, dataLen);
 	*packLen = strlen((char *)packData);
@@ -404,9 +408,8 @@ u8 Tms_HttpGetTranResult(u8 * data) //ck
 	return 0;
 }
 
-
 //not for TYPE_URLGETFILE
-int  Tms_ResolveHTTPPacket(u8 *recvPack) //ck
+int Tms_ResolveHTTPPacket(u8 *recvPack) //ck
 {
 	char *ptr = NULL;
 	int ret;
@@ -585,7 +588,6 @@ int TmsParamSet_Api(char *hostIp, char *hostPort, char *hostDomainName) //ck
 	return 0;
 }
 
-
 void Tms_SetTermParam(u8 *oldAppVer) //ck
 {
 	char tmp[64], ret;
@@ -619,15 +621,10 @@ int Tms_Request(void) //ck
 	int PackLen=0;
 	int ret=0, flen;
 
+
 	memset(TmsTrade.respCode, 0, sizeof(TmsTrade.respCode));
 	memset(TmsTrade.respMsg, 0, sizeof(TmsTrade.respMsg));
-
-	if(TmsTrade.trade_type != TYPE_QR)
-		TmsTrade.trade_type = TYPE_CHECKVERSION;
-	else
-		TmsConnect_Api();
-
-	MAINLOG_L1("TmsTrade.trade_type %d", TmsTrade.trade_type);
+	TmsTrade.trade_type = TYPE_CHECKVERSION;
 
 	memset(t_sBuf, 0, SENDPACKLEN);
 	ret = Tms_CreatePacket(t_sBuf, &PackLen);
@@ -729,6 +726,322 @@ _TMS_DEL_ALL :
 	return 1;
 }
 
+/* KIMLEAN IMPLEMENT TMS DOWNLOAD QR */
+
+int DownloadQRDirectly()
+{
+    int ret = 0;
+    int packLen = 0;
+    int bytesRead = 0;
+    int totalBytes = 0;
+    int contentLength = 0;
+    int headerEnd = 0;
+    int retryCount = 0;
+    int maxRetries = 3;
+    char filePath[128];
+    char tmp[64];
+
+    MAINLOG_L1("DownloadQRDirectly started");
+
+    // Create file path
+    sprintf(filePath, "%s%s", TMS_FILE_DIR, TmsTrade.file[0].name);
+
+    // At this point, either the file doesn't exist or we've deleted an incomplete/outdated one
+    TmsTrade.file[0].startPosi = 0;
+    totalBytes = 0;
+
+    // Initialize MD5 context
+    memset(&TmsTrade.context, 0, sizeof(TmsTrade.context));
+    _tms_MD5Init(&TmsTrade.context);
+
+    // Main download loop - will retry the download if needed
+    while (retryCount < maxRetries) {
+        // Make sure connection is established
+        if (g_tms_socket == NULL || !g_tms_socket->valid) {
+            ret = TmsConnect_Api();
+            if (ret != 0) {
+                MAINLOG_L1("TmsConnect_Api failed: %d", ret);
+                retryCount++;
+                Delay_Api(1000);  // Wait before retry
+                continue;
+            }
+        }
+
+        // Prepare the GET request (no Range header since we're starting fresh)
+        memset(t_sBuf, 0, SENDPACKLEN);
+        sprintf((char *)t_sBuf, "GET %s HTTP/1.1\r\n", TmsTrade.file[0].filePath);
+        sprintf((char *)t_sBuf+strlen((char *)t_sBuf), "Host: %s\r\n", TmsStruct.hostDomainName);
+        strcat((char *)t_sBuf, "Accept: */*\r\n");
+        strcat((char *)t_sBuf, "Connection: Keep-Alive\r\n");
+        strcat((char *)t_sBuf, "User-Agent: Mozilla/4.0(compatible; MSIE 5.5; Windows 98)\r\n");
+        strcat((char *)t_sBuf, "Accept-Encoding: gzip,deflate\r\n\r\n");
+        packLen = strlen((char *)t_sBuf);
+
+        MAINLOG_L1("QR HTTP request: %.100s...", t_sBuf);
+
+        // Send the request
+        ret = TmsSend(t_sBuf, packLen);
+        if (ret != 0) {
+            MAINLOG_L1("TmsSend failed: %d", ret);
+            TmsDisconnect();
+            retryCount++;
+            Delay_Api(1000);  // Wait before retry
+            continue;
+        }
+
+        // Read response in chunks
+        memset(t_rBuf, 0, RECVPACKLEN);
+
+        // First read to get headers
+        bytesRead = TmsReceive(t_rBuf, RECVPACKLEN - 1, RECEIVE_TIMEOUT);
+
+        if (bytesRead <= 0) {
+            MAINLOG_L1("TmsReceive failed on initial read");
+            TmsDisconnect();
+            retryCount++;
+            Delay_Api(1000);  // Wait before retry
+            continue;
+        }
+
+    // Check for HTTP 200 OK
+    if (strstr((char *)t_rBuf, "HTTP/1.1 200") == NULL) {
+        MAINLOG_L1("HTTP response not 200 OK: %.100s", t_rBuf);
+        return _TMS_E_TRANS_FAIL;
+    }
+
+        // Find Content-Length
+        char *contentLenStr = strstr((char *)t_rBuf, "Content-Length:");
+        if (contentLenStr) {
+            contentLenStr += strlen("Content-Length:");
+            // Skip whitespace
+            while (*contentLenStr == ' ' || *contentLenStr == '\t') contentLenStr++;
+            contentLength = atoi(contentLenStr);
+            MAINLOG_L1("Content length: %d", contentLength);
+        } else {
+            MAINLOG_L1("Content-Length header not found");
+            TmsDisconnect();
+            retryCount++;
+            Delay_Api(1000);  // Wait before retry
+            continue;
+        }
+
+        // Find end of headers
+        char *bodyStart = strstr((char *)t_rBuf, "\r\n\r\n");
+        if (!bodyStart) {
+            MAINLOG_L1("Could not find end of headers");
+            TmsDisconnect();
+            retryCount++;
+            Delay_Api(1000);  // Wait before retry
+            continue;
+        }
+
+        bodyStart += 4; // Skip past \r\n\r\n
+        headerEnd = bodyStart - (char *)t_rBuf;
+
+        // Calculate body bytes in first chunk
+        int bodyBytesInFirstChunk = bytesRead - headerEnd;
+
+        // Write first chunk body data if there's any
+        if (bodyBytesInFirstChunk > 0) {
+            ret = WriteFile_Api(filePath, (unsigned char *)bodyStart, 0, bodyBytesInFirstChunk);
+            if (ret != 0) {
+                MAINLOG_L1("WriteFile_Api failed on first chunk: %d", ret);
+                TmsDisconnect();
+                retryCount++;
+                Delay_Api(1000);  // Wait before retry
+                continue;
+            }
+
+            // Update MD5
+            _tms_MD5Update(&TmsTrade.context, (unsigned char *)bodyStart, bodyBytesInFirstChunk);
+
+            // Update total and file position
+            totalBytes = bodyBytesInFirstChunk;
+            TmsTrade.file[0].startPosi = bodyBytesInFirstChunk;
+
+            // Display progress
+            memset(tmp, 0, sizeof(tmp));
+            ScrClrLine_Api(LINE3, LINE4);
+            sprintf(tmp, "%d%% %d/%d", (totalBytes*100)/contentLength, totalBytes, contentLength);
+            ScrDisp_Api(LINE3, 0, TmsTrade.file[0].name, FDISP|CDISP);
+            ScrDisp_Api(LINE4, 0, tmp, FDISP|CDISP);
+        }
+
+        MAINLOG_L1("Expected total size: %d bytes", contentLength);
+
+        // Continue receiving and writing the rest of the file
+        int chunkRetryCount = 0;
+        int lastProgressShown = 0;
+        int progressInterval = 10;  // Show progress every 10%
+
+        while (totalBytes < contentLength) {
+            // Progress display
+            int progressPercent = (totalBytes * 100) / contentLength;
+            if (progressPercent >= lastProgressShown + progressInterval) {
+                MAINLOG_L1("Download progress: %d%% (%d/%d bytes)",
+                        progressPercent, totalBytes, contentLength);
+                lastProgressShown = (progressPercent / progressInterval) * progressInterval;
+
+                memset(tmp, 0, sizeof(tmp));
+                ScrClrLine_Api(LINE3, LINE4);
+                sprintf(tmp, "%d%% %d/%d", progressPercent, totalBytes, contentLength);
+                ScrDisp_Api(LINE3, 0, TmsTrade.file[0].name, FDISP|CDISP);
+                ScrDisp_Api(LINE4, 0, tmp, FDISP|CDISP);
+
+            }
+
+            // Read next chunk
+            memset(t_rBuf, 0, RECVPACKLEN);
+            Tms_StartJumpSec();
+            bytesRead = TmsReceive(t_rBuf, RECVPACKLEN - 1, RECEIVE_TIMEOUT);
+            Tms_StopJumpSec();
+
+            if (bytesRead <= 0) {
+                MAINLOG_L1("TmsReceive failed on chunk read: %d", bytesRead);
+                chunkRetryCount++;
+
+                if (chunkRetryCount >= 3) {
+                    MAINLOG_L1("Too many chunk failures, reconnecting");
+                    TmsDisconnect();
+                    break;  // Break out of chunk loop, will retry from connection
+                }
+                continue;
+            }
+
+            // Reset chunk retry counter on success
+            chunkRetryCount = 0;
+
+            // Write chunk to file
+            ret = WriteFile_Api(filePath, t_rBuf, TmsTrade.file[0].startPosi, bytesRead);
+            if (ret != 0) {
+                MAINLOG_L1("WriteFile_Api failed on chunk: %d", ret);
+                TmsDisconnect();
+                break;  // Break out of chunk loop, will retry from connection
+            }
+
+            // Update MD5
+            _tms_MD5Update(&TmsTrade.context, t_rBuf, bytesRead);
+
+            // Update total and file position
+            totalBytes += bytesRead;
+            TmsTrade.file[0].startPosi += bytesRead;
+
+            // Check if we need to reconnect (some servers close connection after a while)
+            if (Tms_NeedReConnect(t_rBuf) == 0) {
+                MAINLOG_L1("Server requested connection close, reconnecting");
+                TmsDisconnect();
+                ret = TmsConnect_Api();
+                if (ret != 0) {
+                    MAINLOG_L1("Reconnect failed: %d", ret);
+                    break;  // Break out of chunk loop, will retry from connection
+                }
+            }
+            Delay_Api(100);
+        }
+
+        // Check if download is complete
+        if (totalBytes >= contentLength) {
+            MAINLOG_L1("Download complete: %d of %d bytes", totalBytes, contentLength);
+
+            // Finalize MD5
+            unsigned char md5result[16];
+            _tms_MD5Final(md5result, &TmsTrade.context);
+
+            // Set file as complete
+            TmsTrade.file[0].fsize = totalBytes;
+            TmsTrade.file[0].status = STATUS_DLCOMPLETE;
+
+            MAINLOG_L1("QR file downloaded successfully: %s (%d bytes)",
+                      TmsTrade.file[0].name, totalBytes);
+
+            // Unzip the downloaded file
+            MAINLOG_L1("Unzipping QR file to %s", TMS_FILE_DIR);
+
+            // Unzip the file to the TMS directory
+            ret = fileunZip_lib((unsigned char*)filePath, TMS_FILE_DIR);
+
+            if (ret == 0) {
+                MAINLOG_L1("QR file extracted successfully");
+//                 DelFile_Api(filePath);
+            } else {
+                MAINLOG_L1("Failed to extract QR file: %d", ret);
+                // Even if unzip fails, we consider the download successful
+            }
+
+            return 0;
+        }
+
+        // If we got here, the download wasn't complete, so retry
+        MAINLOG_L1("Download incomplete: got %d of %d bytes, retrying",
+                 totalBytes, contentLength);
+        retryCount++;
+    }
+
+    // If we reached maximum retries
+    if (retryCount >= maxRetries) {
+        MAINLOG_L1("Max retries reached. Download incomplete.");
+        return _TMS_E_DOWNUNCOMPLETE;
+    }
+
+    return _TMS_E_RECV_PACKET;
+}
+
+int TmsDownloadQR_Api(char* merchantId)
+{
+    int ret;
+
+    MAINLOG_L1("Starting TmsDownloadQR_Api for merchant: %s", merchantId);
+
+    // Allocate buffers (same as TmsDownload_Api)
+    t_sBuf = malloc(SENDPACKLEN);
+    if (t_sBuf == NULL) {
+        MAINLOG_L1("t_sBuf malloc failed!");
+        return _TMS_E_MALLOC_NOTENOUGH;
+    }
+
+    t_rBuf = malloc(RECVPACKLEN);
+    if (t_rBuf == NULL) {
+        MAINLOG_L1("t_rBuf malloc failed!");
+        free(t_sBuf);
+        return _TMS_E_MALLOC_NOTENOUGH;
+    }
+
+    // Set terminal parameters (reuse your existing function)
+    Tms_SetTermParam((u8*)App_Msg.Version);
+
+    // Save merchant ID
+    strcpy(TmsStruct.merNo, merchantId);
+
+    // Set trade type to QR
+    TmsTrade.trade_type = TYPE_QR;
+
+    // Use your existing process
+    ret = Tms_CommProcess();
+
+    // Cleanup resources
+    TmsDisconnect();
+    free(t_sBuf);
+    free(t_rBuf);
+
+    return ret;
+}
+
+int DownloadMerchantQR()
+{
+    int ret;
+
+    // Download QR code
+    ret = TmsDownloadQR_Api(G_sys_param.sn);
+    if (ret != 0) {
+        MAINLOG_L1("QR download failed: %d", ret);
+        return ret;
+    }
+
+    MAINLOG_L1("QR download succeeded");
+    return 0;
+}
+
+/* KIMLEAN IMPLEMENT TMS DOWNLOAD QR */
 
 int Tms_Notify(void) //ck
 {
@@ -770,9 +1083,46 @@ int Tms_Notify(void) //ck
 
 int Tms_CommProcess() //ck
 {
-    int ret = 0;
+	int ret = 0;
+	int packLen = 0;
 
-    MAINLOG_L1("Tms_CommProcess started");
+	MAINLOG_L1("Tms_CommProcess started with trade_type: %d", TmsTrade.trade_type);
+
+	// Special handling for QR downloads
+	if (TmsTrade.trade_type == TYPE_QR) {
+		MAINLOG_L1("Processing QR download request");
+
+		// Setup single file for QR download
+		memset(TmsTrade.respCode, 0, sizeof(TmsTrade.respCode));
+		memset(TmsTrade.respMsg, 0, sizeof(TmsTrade.respMsg));
+
+		// Initialize file information
+		memset(&TmsTrade.file[0], 0, sizeof(struct __FileStruct__));
+		sprintf(TmsTrade.file[0].name, "%s_KHR.zip", TmsStruct.merNo);
+		strcpy(TmsTrade.file[0].type, TYPE_QR_STR);
+		strcpy(TmsTrade.file[0].version, "1.0");
+		sprintf(TmsTrade.file[0].filePath, "/tms/Vanstone/QR/%s/%s.zip",
+				TmsStruct.merNo,TmsStruct.merNo);
+		TmsTrade.file[0].status = STATUS_DLUNCOMPLETE;
+		TmsTrade.file[0].startPosi = 0;
+
+		// Set file count
+		TmsTrade.fnum = 1;
+		TmsTrade.curfindex = 0;
+
+		// Display progress
+		AppPlayTip("Downloading QR");
+		ret = TmsConnect_Api();
+		if (ret != 0){
+			AppPlayTip("Connect to the server failed");
+			TmsDisconnect();
+			return ret;
+		}
+		// IMPORTANT: Custom QR download approach
+		ret = DownloadQRDirectly();
+
+		return ret;
+	}
 
     MAINLOG_L1("Calling Tms_Request()");
     ret = Tms_Request();
@@ -835,7 +1185,6 @@ _TMS_NOTIFY_:
     return ret;
 }
 
-
 int TmsDownload_Api(u8 *appCurrVer) //ck
 {
     int ret;
@@ -880,7 +1229,6 @@ int TmsDownload_Api(u8 *appCurrVer) //ck
     MAINLOG_L1("Returning from TmsDownload_Api with ret: %d", ret);
     return ret;
 }
-
 
 //0:all updated   -1:no config file   -2:download uncommplete  -3:font/param download over but not update       -4:application download over but not update   -5:LIB download over but not update
 // 0 -1 :unnecessary to do anything           -2:download again       -3/-4/-5:call TmsUpdate_Api again
@@ -930,16 +1278,6 @@ int TmsStatusCheck_Api(u8 *appCurrVer) //ck
 					}
 				}
 			}
-			else if (strcmp(GFfile.file[i].type, TYPE_QR_STR) == 0)
-			{
-				char srcPath[256];
-				/* downloaded into your standard dir (e.g. TMS_FILE_DIR) */
-				sprintf(srcPath, "%s%s", TMS_FILE_DIR, GFfile.file[i].name);
-				/* unzip into /ext/tms/ as requested */
-				fileunZip_lib((unsigned char*)srcPath, "/ext/tms/");
-				/* optionally delete the zip */
-				DelFile_Api(srcPath);
-			}
 		}
 	}
 
@@ -964,7 +1302,6 @@ int TmsStatusCheck_Api(u8 *appCurrVer) //ck
 	return 0;
 }
 
-
 //0:success  -1:no config file   -2:download uncomplete  -3:update font/param files failed
 int TmsUpdate_Api(u8 *appCurrVer)
 {
@@ -985,7 +1322,6 @@ int TmsUpdate_Api(u8 *appCurrVer)
 	}
 
 	//replace font and parameter files
-
 	for(i = 0; i < GFfile.fnum; i++)
 	{
 		if(GFfile.file[i].status == STATUS_DLCOMPLETE) //downloading finished but not replaced
@@ -1128,22 +1464,22 @@ int TmsUpdate_Api(u8 *appCurrVer)
 	return 0;
 }
 
-
 int Tms_DownloadUrlFilesOneByOne()
 {
     char tmp[32], dname[64];
-    int i, Ret, curfidx;
-    int clen, stlen=0, thisLen,tlen = 0, len=0, mlen=0, sidx=0;
-    int PackLen=0;
+    int i, Ret = 0, curfidx;
+    int clen, stlen = 0, thisLen, tlen = 0, len = 0, mlen = 0, sidx = 0;
+    int PackLen = 0;
     char *p = NULL;
 
-    while((TmsTrade.file[TmsTrade.curfindex].status == STATUS_DLUNCOMPLETE) && (TmsTrade.curfindex < TmsTrade.fnum))
-    {
+    MAINLOG_L1("Starting segmented URL file download");
+
+    while ((TmsTrade.file[TmsTrade.curfindex].status == STATUS_DLUNCOMPLETE) && (TmsTrade.curfindex < TmsTrade.fnum)) {
         curfidx = TmsTrade.curfindex;
-        if(TmsTrade.file[TmsTrade.curfindex].startPosi > TmsTrade.file[TmsTrade.curfindex].fsize)
-        {
-            Tms_LstDbgOutApp("Dfile size wrong startPosi:", (u8 *)&TmsTrade.file[TmsTrade.curfindex].startPosi, sizeof(TmsTrade.file[TmsTrade.curfindex].startPosi), 0);
-            Tms_LstDbgOutApp("Dfile size wrong fsize:", (u8 *)&TmsTrade.file[TmsTrade.curfindex].fsize, sizeof(TmsTrade.file[TmsTrade.curfindex].fsize), 0);
+        MAINLOG_L1("Processing file index: %d", curfidx);
+
+        if (TmsTrade.file[curfidx].startPosi > TmsTrade.file[curfidx].fsize) {
+            MAINLOG_L1("Invalid file startPosi (%d) > fsize (%d)", TmsTrade.file[curfidx].startPosi, TmsTrade.file[curfidx].fsize);
             Ret = _TMS_E_FILESIZE;
             break;
         }
@@ -1151,41 +1487,43 @@ int Tms_DownloadUrlFilesOneByOne()
         if(TmsTrade.file[TmsTrade.curfindex].startPosi == 0)
         {
             memset(&TmsTrade.context, 0, sizeof(TmsTrade.context));
-            _tms_MD5Init (&TmsTrade.context);
+            _tms_MD5Init(&TmsTrade.context);
             Tms_LstDbgOutApp("_tms_MD5Init:", NULL, 0, 1);
+            MAINLOG_L1("MD5 context initialized");
         }
 
         memset(dname, 0, sizeof(dname));
-        Tms_getDomainName(TmsTrade.file[TmsTrade.curfindex].filePath, dname);
+        Tms_getDomainName(TmsTrade.file[curfidx].filePath, dname);
+        MAINLOG_L1("Extracted domain: %s", dname);
 
-        for(i=TmsTrade.file[TmsTrade.curfindex].startPosi; i<TmsTrade.file[TmsTrade.curfindex].fsize; i+=EXFCONTENT_LEN)
-        {
+        for (i = TmsTrade.file[curfidx].startPosi; i < TmsTrade.file[curfidx].fsize; i += EXFCONTENT_LEN) {
             memset(t_sBuf, 0, SENDPACKLEN);
 
-            thisLen = (TmsTrade.file[TmsTrade.curfindex].fsize-TmsTrade.file[TmsTrade.curfindex].startPosi)>EXFCONTENT_LEN?EXFCONTENT_LEN:(TmsTrade.file[TmsTrade.curfindex].fsize-TmsTrade.file[TmsTrade.curfindex].startPosi);
+            thisLen = (TmsTrade.file[curfidx].fsize - TmsTrade.file[curfidx].startPosi) > EXFCONTENT_LEN ?
+                      EXFCONTENT_LEN : (TmsTrade.file[curfidx].fsize - TmsTrade.file[curfidx].startPosi);
 
-            sprintf((char *)t_sBuf, "GET %s HTTP/1.1\r\n", TmsTrade.file[TmsTrade.curfindex].filePath);
+            sprintf((char *)t_sBuf, "GET %s HTTP/1.1\r\n", TmsTrade.file[curfidx].filePath);
             strcat((char *)t_sBuf, "Accept: image/gif, image/x-xbitmap, image/jpeg, image/pjpeg, */*\r\n");
             strcat((char *)t_sBuf, "User-Agent: Mozilla/4.0 (compatible; MSIE 5.5; Windows 98)\r\n");
-            sprintf((char *)t_sBuf+strlen((char *)t_sBuf), "Range: bytes=%d-%d\r\n", TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].startPosi+thisLen-1);
-            sprintf((char *)t_sBuf+strlen((char *)t_sBuf), "Host: %s\r\n\r\n", dname);
-            PackLen = strlen((char *)t_sBuf);
-            Tms_LstDbgOutApp("request:", t_sBuf, PackLen, 1);
+            sprintf((char *)t_sBuf + strlen((char *)t_sBuf), "Range: bytes=%d-%d\r\n", TmsTrade.file[curfidx].startPosi,
+                    TmsTrade.file[curfidx].startPosi + thisLen - 1);
+            sprintf((char *)t_sBuf + strlen((char *)t_sBuf), "Host: %s\r\n\r\n", dname);
 
-            // Use TmsSend instead of dev_send
+            PackLen = strlen((char *)t_sBuf);
+            MAINLOG_L1("Requesting byte range: %d-%d", TmsTrade.file[curfidx].startPosi,
+                       TmsTrade.file[curfidx].startPosi + thisLen - 1);
+
             Ret = TmsSend(t_sBuf, PackLen);
-            if(Ret != 0)
-            {
-                Tms_LstDbgOutApp("DUF CommTxd_Api:", (u8 *)&Ret, sizeof(Ret), 0);
-                if(Ret != 0xff)
-                {
+            if (Ret != 0) {
+                MAINLOG_L1("TmsSend failed, attempting resend. Code: %d", Ret);
+                if (Ret != 0xff) {
                     Ret = _TMS_E_SEND_PACKET;
                     break;
                 }
 
                 Ret = Tms_ReSend(t_sBuf, PackLen);
-                if(Ret != 0)
-                {
+                if (Ret != 0) {
+                    MAINLOG_L1("Tms_ReSend also failed. Code: %d", Ret);
                     Ret = _TMS_E_SEND_PACKET;
                     break;
                 }
@@ -1193,105 +1531,95 @@ int Tms_DownloadUrlFilesOneByOne()
 
             tlen = 0;
             memset(t_rBuf, 0, RECVPACKLEN);
-            while(1)
-            {
+
+            while (1) {
                 Tms_StartJumpSec();
-                // Use TmsReceive instead of dev_recv
-                Ret = TmsReceive(t_rBuf+tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
+                Ret = TmsReceive(t_rBuf + tlen, RECEIVE_BUF_SIZE - 1 - tlen, RECEIVE_TIMEOUT);
                 Tms_StopJumpSec();
+
                 if (Ret <= 0) {
+                    MAINLOG_L1("TmsReceive failed or timed out. Code: %d", Ret);
                     Ret = _TMS_E_RECV_PACKET;
                     break;
                 }
 
                 len = Ret;
-                Ret = 0;
-                //Tms_LstDbgOutApp("receive:", t_rBuf+tlen, len, 0);
                 tlen += len;
-                if(Tms_getContentLen(t_rBuf, &clen, &stlen) != 0)
+
+                if (Tms_getContentLen(t_rBuf, &clen, &stlen) != 0)
                     continue;
 
-                if((p = strstr((char *)t_rBuf, "\n")) == NULL)  //\r\n
+                if ((p = strstr((char *)t_rBuf, "\n")) == NULL)
                     return _TMS_E_RESOLVE_PACKET;
+
                 memset(tmp, 0, sizeof(tmp));
-                memcpy(tmp, t_rBuf, ((unsigned char*)p)-t_rBuf);
-                if((strstr(tmp, "200") == NULL) && (strstr(tmp, "206") == NULL))
-                {
+                memcpy(tmp, t_rBuf, ((unsigned char *)p) - t_rBuf);
+
+                if ((strstr(tmp, "200") == NULL) && (strstr(tmp, "206") == NULL)) {
+                    MAINLOG_L1("Unexpected HTTP response: %s", tmp);
                     memset(TmsTrade.respMsg, 0, sizeof(TmsTrade.respMsg));
-                    if(strlen(tmp) > (sizeof(TmsTrade.respMsg)-1))
-                        memcpy(TmsTrade.respMsg, tmp, sizeof(TmsTrade.respMsg)-1);
-                    else
-                        memcpy(TmsTrade.respMsg, tmp, strlen(tmp));
+                    strncpy(TmsTrade.respMsg, tmp, sizeof(TmsTrade.respMsg) - 1);
                     return _TMS_E_TRANS_FAIL;
                 }
 
                 p = strstr((char *)t_rBuf, "\r\n\r\n");
-                if(tlen > stlen)
-                {
+
+                if (tlen > stlen) {
+                    MAINLOG_L1("Received more than expected: %d > %d", tlen, stlen);
                     Ret = _TMS_E_RECV_PACKET;
                     break;
-                }
-                else if(tlen == stlen)
-                {
-                    if((tlen-(p+4-(char *)t_rBuf)) > 0)
-                    {
-#ifdef DISP_STH
-                        ScrClrLine_Api(LINE3, LINE4);
-                        memset(tmp, 0, sizeof(tmp));
-                        sprintf(tmp, "%d%% %d/%d", (TmsTrade.file[TmsTrade.curfindex].startPosi*100)/TmsTrade.file[TmsTrade.curfindex].fsize, TmsTrade.file[TmsTrade.curfindex].startPosi, TmsTrade.file[TmsTrade.curfindex].fsize);
-                        ScrDisp_Api(LINE3, 0, TmsTrade.file[TmsTrade.curfindex].name, FDISP|CDISP);
-                        ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);
-#endif
-                        Ret = Tms_WriteFile(&TmsTrade.file[TmsTrade.curfindex], (unsigned char*)(p+4), thisLen);
-                        if(Ret != 0)
-                        {
+                } else if (tlen == stlen) {
+                    if ((tlen - (p + 4 - (char *)t_rBuf)) > 0) {
+                        MAINLOG_L1("Writing %d bytes to file at pos %d", thisLen, TmsTrade.file[curfidx].startPosi);
+
+                        Ret = Tms_WriteFile(&TmsTrade.file[curfidx], (unsigned char *) (p + 4), thisLen);
+                        if (Ret != 0) {
+                            MAINLOG_L1("File write error. Code: %d", Ret);
                             Ret = _TMS_E_FILE_WRITE;
-                            Tms_LstDbgOutApp("Retwr2:", (u8 *)&Ret, sizeof(Ret), 0);
                             break;
                         }
                     }
 
-                    if(Tms_NeedReConnect(t_rBuf) == 0) //reconnect
-                    {
+                    if (Tms_NeedReConnect(t_rBuf) == 0) {
                         TmsDisconnect();
                         Ret = TmsConnect_Api();
-                        Tms_LstDbgOutApp("TmsConnect_Api:", (u8 *)&Ret, sizeof(Ret), 0);
-                        if(Ret != 0)
+                        MAINLOG_L1("Reconnected after segment. Code: %d", Ret);
+                        if (Ret != 0)
                             Ret = _TMS_E_ERR_CONNECT;
                     }
                     break;
                 }
-            }//while(1)
-            if(Ret != 0)
-            {
-                Tms_LstDbgOutApp("in while:", (u8 *)&Ret, sizeof(Ret), 0);
+            }
+
+            if (Ret != 0) {
+                MAINLOG_L1("Segment loop error. Code: %d", Ret);
                 break;
             }
 
-            if(TmsTrade.file[curfidx].startPosi > TmsTrade.file[curfidx].fsize)
-            {
+            if (TmsTrade.file[curfidx].startPosi > TmsTrade.file[curfidx].fsize) {
+                MAINLOG_L1("Received exceeds filesize. startPosi: %d, fsize: %d",
+                           TmsTrade.file[curfidx].startPosi, TmsTrade.file[curfidx].fsize);
                 Ret = _TMS_E_FILESIZE;
-                Tms_LstDbgOutApp("recv>real recv:", (u8 *)&TmsTrade.file[curfidx].startPosi, sizeof(TmsTrade.file[curfidx].startPosi), 0);
-                Tms_LstDbgOutApp("recv>real real:", (u8 *)&TmsTrade.file[curfidx].fsize, sizeof(TmsTrade.file[curfidx].fsize), 0);
                 break;
             }
-            if(TmsTrade.file[curfidx].status == STATUS_DLCOMPLETE)
-            {
-#ifdef DISP_STH
-                ScrClrLine_Api(LINE3, LINE4);
-                memset(tmp, 0, sizeof(tmp));
-                sprintf(tmp, "100%% %d/%d", TmsTrade.file[curfidx].startPosi, TmsTrade.file[curfidx].fsize);
-                ScrDisp_Api(LINE3, 0, TmsTrade.file[curfidx].name, FDISP|CDISP);
-                ScrDisp_Api(LINE4, 0, tmp,FDISP|CDISP);
-#endif
+
+            if (TmsTrade.file[curfidx].status == STATUS_DLCOMPLETE) {
+                MAINLOG_L1("File download complete: %s", TmsTrade.file[curfidx].name);
                 break;
             }
-        }//for - one file
-        if(Ret != 0)
+        } // for one file
+
+        if (Ret != 0)
             break;
-    }//while --all files
-    if(Ret != 0)
+    } // while all files
+
+    if (Ret != 0) {
+        MAINLOG_L1("Download failed. Disconnecting.");
         TmsDisconnect();
+    } else {
+        MAINLOG_L1("All files downloaded successfully.");
+    }
+
     return Ret;
 }
 
@@ -1475,7 +1803,6 @@ int Tms_WriteFile(struct __FileStruct__ *file, unsigned char *Buf,unsigned int L
 	return 0;
 }
 
-
 void Tms_DelFile(struct __FileStruct__ *file) //ck //ck
 {
 	char tmp[64];
@@ -1560,7 +1887,6 @@ int TmsDelFile_Api(int type) //CK
 	}
 	return ret;
 }
-
 
 //check if all files are download completely
 //return: 0-all download over    others-not over
@@ -1665,6 +1991,7 @@ int Tms_ReConnect()
     }
     return ret;
 }
+
 ////only for case 0xff
 //return : 0-success   _TMS_E_SEND_PACKET--reconnect or send failed
 int Tms_ReSend(u8 *packData, int PackLen) //ck

@@ -119,6 +119,7 @@ struct __TmsTrade__
 	u8  	md5data[64];
 	int 	mdlen;
 	char	deviceType[8];  //M
+    char    merchantId[32]; // Added for QR downloads
 };
 
 struct __TmsStruct__   //Open for Clients  //M-mandatory   O-Optional
@@ -134,6 +135,7 @@ struct __TmsStruct__   //Open for Clients  //M-mandatory   O-Optional
 	char	hostDomainName[64];  // M    mandatory for http (check version and notify) message
 	char    oldAppVer[26];  //old app version
 	int		tradeTimeoutValue;
+	char    merchantId[32]; // Added for QR downloads
 };
 
 #define	MAX_DOMAIN_LENGTH	128

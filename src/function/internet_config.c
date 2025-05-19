@@ -262,7 +262,6 @@ void DisplayChoiceNetwork()
 		switch (nSelcItem)
 		{
 			case DIGITAL1:
-				saveInternetConnectionType(2);
 				ConfigWifi();
 				return;
 			case DIGITAL2:

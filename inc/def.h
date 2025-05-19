@@ -75,7 +75,7 @@ typedef struct {
 //
 // Maximum number of socket slots
 #define MAX_SOCKETS 10
-#define CERTI_LEN  1024*2
+#define CERTI_LEN  1024*7
 
 typedef struct {
 	int protocol;

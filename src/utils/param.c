@@ -77,8 +77,8 @@ void initParam(void) {
             // Add validation to ensure the file contains valid data
             if (strlen(G_sys_param.mqtt_server) > 0 &&
                 strlen(G_sys_param.mqtt_port) > 0) {
-                // strcpy(G_sys_param.mqtt_server, ENV_IOT_IP);
-				strcpy(G_sys_param.mqtt_server, ENV_DEV_IOT_IP);
+                 strcpy(G_sys_param.mqtt_server, ENV_IOT_IP);
+//				strcpy(G_sys_param.mqtt_server, ENV_DEV_IOT_IP);
                 strcpy(G_sys_param.mqtt_port, ENV_IOT_PORT);
                 G_sys_param.mqtt_ssl = 0;
                 G_sys_param.mqtt_qos = 0;
@@ -98,8 +98,8 @@ void initParam(void) {
         memset(&G_sys_param, 0, sizeof(SYS_PARAM));
 
         readSN(G_sys_param.sn);
-        // strcpy(G_sys_param.mqtt_server, ENV_IOT_IP);
-		strcpy(G_sys_param.mqtt_server, ENV_DEV_IOT_IP);
+        strcpy(G_sys_param.mqtt_server, ENV_IOT_IP);
+//		strcpy(G_sys_param.mqtt_server, ENV_DEV_IOT_IP);
         strcpy(G_sys_param.mqtt_port, ENV_IOT_PORT);
         G_sys_param.mqtt_ssl = 0;
         G_sys_param.mqtt_qos = 0;

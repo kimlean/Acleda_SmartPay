@@ -271,6 +271,7 @@ relocate_301:
         p = strstr((char *)buf, "\r\n");
         if (!p) {
             MAINLOG_L1("Status line incomplete, continuing to receive...");
+            Delay_Api(500);
             continue; // Not complete, continue receiving
         }
 

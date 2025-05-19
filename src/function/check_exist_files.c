@@ -64,7 +64,9 @@ void check_exist_files() {
     if (exist_or_not == 1) {
         MAINLOG_L1("**** Yes Images");
     }else{
-    	download_qr_image_main();
+
+    	// KIMLEAN CLOSING CODE NOT TO DOWNLOAD FIRST
+//    	download_qr_image_main();
     }
 }
 

@@ -155,7 +155,7 @@ void *net_connect(void* attch, const char *host, const char *port, int timerOutM
                 return NULL;
             }
 
-            ret = wifiTCPConnect_lib(sock, host, port, timerOutMs);
+            ret = wifiTCPConnect_lib(sock, host, port, 60 * 1000);
             MAINLOG_L1("wifiTCPConnect_lib:%d", ret);
             if(ret != 0)
             {

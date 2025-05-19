@@ -21,8 +21,6 @@
 #include "httpDownload.h"
 #include "EmvCommon.h"
 
-#include "tms_tms.h"
-
 // EMQX broker settings
 //#define MQTT_BROKER "172.17.199.46"
 //#define MQTT_PORT "1883"           // Use "8883" for TLS
@@ -409,13 +407,27 @@ static void onTopicMessageArrived(MessageData *md) {
         ScrCls_Api();
     }
     else if (strcmp(type, "DOWN_QR") == 0) {
-        // Download QR
-        MAINLOG_L1("Download QR command received");
-        TmsTrade.trade_type = TYPE_QR;
-        TmsDownload_Api((u8 *)App_Msg.Version);
-//        check_exist_files();
-//        download_qr_image_main();
-//        initQRImage();
+    	MAINLOG_L1("Download QR command received");
+		ScrCls_Api();
+		ScrDisp_Api(LINE5, 0, "Downloading QR...", CDISP);
+
+		int ret = 0;
+		// IMPLEMENT TMS CODE IN HERE
+		ret = DownloadMerchantQR();
+		if (ret == 0) {
+			MAINLOG_L1("QR download succeeded");
+			ScrCls_Api();
+			ScrDisp_Api(LINE5, 0, "QR Download Success", CDISP);
+            Delay_Api(1000);
+            ScrBrush_Api();
+            initQRImage();
+			g_RefreshQRDisplay = 1;
+
+		} else {
+			MAINLOG_L1("QR download failed");
+			ScrCls_Api();
+			ScrDisp_Api(LINE5, 0, "QR Download Failed", CDISP);
+		}
     }
     else if (strcmp(type, "DEL_MP3") == 0) {
         // Delete MP3
